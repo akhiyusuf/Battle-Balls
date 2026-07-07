@@ -35,6 +35,11 @@ export default function App() {
       if (!alive) return;
       canvas.className = "game-canvas";
       canvasHost.current?.appendChild(canvas);
+      if (location.search.includes("weapons")) {
+        // dev sheet for eyeballing all weapon sprites at once
+        game.renderer.debugWeaponSheet(ROSTER.map(c => ({ name: c.name, def: c })));
+        return;
+      }
       // open straight into a random demo fight
       const pool = ROSTER.map(c => c.id);
       const a = pool[Math.floor(Math.random() * pool.length)];

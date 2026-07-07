@@ -1,6 +1,6 @@
 import Matter from "matter-js";
 import type { CharacterDef, WeaponShape } from "./types";
-import { METER_MAX } from "./constants";
+import { METER_MAX, VEL } from "./constants";
 
 export const CAT_BALL = 0x0001;
 export const CAT_WEAPON = 0x0002;
@@ -70,14 +70,14 @@ export class Fighter {
     this.body = Matter.Bodies.circle(x, y, def.radius, {
       // Low restitution so colliding balls stay mashed together and keep
       // brawling instead of flinging apart (they re-seek immediately anyway).
-      restitution: 0.35,
+      restitution: 0.5,
       friction: 0,
       frictionAir: 0,
       frictionStatic: 0,
       density: 0.0012 * (def.massMult ?? 1),
       collisionFilter: { group, category: CAT_BALL, mask: CAT_BALL | CAT_WEAPON | CAT_PROJ | CAT_WALL },
     });
-    Matter.Body.setVelocity(this.body, { x: Math.cos(dir) * def.speed, y: Math.sin(dir) * def.speed });
+    Matter.Body.setVelocity(this.body, { x: Math.cos(dir) * def.speed * VEL, y: Math.sin(dir) * def.speed * VEL });
     (this.body.plugin as BodyTag) = { role: "ball", fighter: this };
 
     this.buildWeapon(group, x, y);
@@ -162,21 +162,23 @@ export class Fighter {
       Matter.Body.setAngularVelocity(this.weapon, this.weapon.angularVelocity * 0.8);
       return;
     }
-    const cur = this.weapon.angularVelocity;
+    // Work in real rad/s, convert at the boundary (Matter angular velocity is per-tick).
+    const cur = this.weapon.angularVelocity * 60;
     const want = targetSpin * this.spinDir;
     // proportional motor; clamped so clashes still knock the weapon around
-    const accel = Math.max(-30, Math.min(30, (want - cur) * 6)) * dt;
-    Matter.Body.setAngularVelocity(this.weapon, cur + accel);
+    const accel = Math.max(-40, Math.min(40, (want - cur) * 6)) * dt;
+    Matter.Body.setAngularVelocity(this.weapon, (cur + accel) * VEL);
   }
 
   /** Point a gun-type weapon toward a world position (aim instead of spin). */
-  aimWeapon(tx: number, ty: number, dt: number) {
+  aimWeapon(tx: number, ty: number) {
     if (!this.weapon || this.frozen > 0) return;
     const want = Math.atan2(ty - this.body.position.y, tx - this.body.position.x);
     let diff = want - this.weapon.angle;
     while (diff > Math.PI) diff -= Math.PI * 2;
     while (diff < -Math.PI) diff += Math.PI * 2;
-    Matter.Body.setAngularVelocity(this.weapon, Math.max(-14, Math.min(14, diff * 10)) * (dt * 60) * 0.2 + this.weapon.angularVelocity * 0.4);
+    const wantAV = Math.max(-10, Math.min(10, diff * 8)); // rad/s
+    Matter.Body.setAngularVelocity(this.weapon, wantAV * VEL);
   }
 
   gainMeter(n: number) {

@@ -1,6 +1,6 @@
 import Matter from "matter-js";
 import type { CharacterDef } from "./types";
-import { ARENA_SIZE, ARENA_X, ARENA_Y } from "./constants";
+import { ARENA_SIZE, ARENA_X, ARENA_Y, VEL } from "./constants";
 import { Sound } from "./audio";
 
 const f2 = (n: number) => n.toFixed(2);
@@ -67,16 +67,21 @@ export const ROSTER: CharacterDef[] = [
     ult: {
       name: "HIGH NOON", gainDealt: 1.15, gainTaken: 0.7,
       fire(f, e) {
-        // fan the whole cylinder at every enemy
-        const targets = e.enemies(f);
+        // quick-draw: the whole cylinder, fanned one shot at a time
         for (let i = 0; i < 6; i++) {
-          const t = targets[i % Math.max(1, targets.length)];
-          const a = t ? Math.atan2(t.y - f.y, t.x - f.x) + e.rng.range(-0.08, 0.08) : e.rng.range(0, Math.PI * 2);
-          e.spawnProjectile(f, "bullet", f.x + Math.cos(a) * (f.def.radius + 26), f.y + Math.sin(a) * (f.def.radius + 26), a,
-            { speed: 650, dmg: f.st.damage * 1.4, r: 9, color: 0xffd94d, life: 2 });
+          e.schedule(0.12 + i * 0.14, () => {
+            if (!f.alive) return;
+            const targets = e.enemies(f);
+            const t = targets[i % Math.max(1, targets.length)];
+            const a = t ? e.aimLead(f.x, f.y, t, 900) + e.rng.range(-0.04, 0.04) : e.rng.range(0, Math.PI * 2);
+            const mx = f.x + Math.cos(a) * (f.def.radius + 26), my = f.y + Math.sin(a) * (f.def.radius + 26);
+            e.spawnProjectile(f, "bullet", mx, my, a,
+              { speed: 900, dmg: f.st.damage * 1.4, r: 9, color: 0xffd94d, life: 2 });
+            e.burst(mx, my, 5, 0xffe259, 220);
+            Sound.pew();
+          });
         }
         f.st.ammo = 6;
-        Sound.pew();
       },
     },
     update(f, e, dt) {
@@ -113,12 +118,18 @@ export const ROSTER: CharacterDef[] = [
     ult: {
       name: "HEARTBREAK FINALE", gainDealt: 1.0, gainTaken: 0.8,
       fire(f, e) {
-        for (let i = 0; i < 8; i++) {
-          const a = (i / 8) * Math.PI * 2;
-          e.spawnProjectile(f, "heart", f.x + Math.cos(a) * (f.def.radius + 16), f.y + Math.sin(a) * (f.def.radius + 16), a,
-            { speed: 210, dmg: f.st.damage * 2, r: 15, color: 0xf284c1, life: 4, turn: 2.4 });
+        // a giant double-ring magic circle blooms, then hearts spiral out in waves
+        e.ring(f.x, f.y, 300, 0xf284c1);
+        e.schedule(0.15, () => e.ring(f.x, f.y, 380, 0xffffff));
+        for (let i = 0; i < 10; i++) {
+          e.schedule(0.2 + i * 0.09, () => {
+            if (!f.alive) return;
+            const a = (i / 10) * Math.PI * 2 + 0.6;
+            e.spawnProjectile(f, "heart", f.x + Math.cos(a) * (f.def.radius + 16), f.y + Math.sin(a) * (f.def.radius + 16), a,
+              { speed: 240, dmg: f.st.damage * 1.8, r: 15, color: 0xf284c1, life: 4, turn: 2.6 });
+            Sound.magic();
+          });
         }
-        Sound.magic();
       },
     },
     update(f, e, dt) {
@@ -174,28 +185,17 @@ export const ROSTER: CharacterDef[] = [
     ult: {
       name: "WORLD STASIS", gainDealt: 1.0, gainTaken: 0.9,
       fire(f, e) {
-        // Pause time for the whole arena, then rain daggers. Each cast throws
-        // MORE daggers and holds the freeze SLIGHTLY LONGER. The daggers are
-        // themselves caught in the stasis — they hang in the air, each locked
-        // onto the opponent's position at the instant it was thrown, and only
-        // launch once the time-stop ends.
+        // ZA WARUDO: freeze the whole arena. During the pause Stasis throws
+        // daggers one by one — they hang in the air, each locked onto the
+        // opponent's position at the instant it was thrown, and all launch
+        // together when time resumes. Every cast throws MORE daggers and
+        // holds the freeze slightly longer.
         const casts = (f.st.casts ?? 0) + 1;
         f.st.casts = casts;
-        const pause = Math.min(3.6, 1.7 + (casts - 1) * 0.4);
+        const pause = Math.min(4.2, 2.0 + (casts - 1) * 0.45);
         const count = 6 + (casts - 1) * 4;
-        e.beginStasis(pause);
+        e.beginStasis(pause, f, count);
         e.ring(f.x, f.y, ARENA_SIZE * 0.72, f.def.color);
-        const target = e.nearestEnemy(f);
-        for (let i = 0; i < count; i++) {
-          const around = (i / count) * Math.PI * 2;
-          const ring = f.def.radius + 34 + (i % 3) * 26;
-          const sx = f.x + Math.cos(around) * ring;
-          const sy = f.y + Math.sin(around) * ring;
-          // Lock each dagger to where the opponent is DURING the pause.
-          const aim = target ? Math.atan2(target.y - sy, target.x - sx) : around;
-          e.spawnProjectile(f, "dagger", sx, sy, aim,
-            { speed: 1050, dmg: f.st.damage * 2.1, l: 52, w: 13, color: 0xcdeefc, life: 3.5, held: true });
-        }
         Sound.freeze();
       },
     },
@@ -255,7 +255,7 @@ export const ROSTER: CharacterDef[] = [
           const d = Math.hypot(o.x - f.x, o.y - f.y) || 1;
           if (d < 420) {
             const pull = 0.9 / d;
-            Matter.Body.applyForce(o.body, o.body.position, { x: (f.x - o.x) * pull * 0.003, y: (f.y - o.y) * pull * 0.003 });
+            Matter.Body.applyForce(o.body, o.body.position, { x: (f.x - o.x) * pull * 0.00012, y: (f.y - o.y) * pull * 0.00012 });
           }
         }
       } else if (f.st.field && f.ultT <= 0) {
@@ -273,9 +273,16 @@ export const ROSTER: CharacterDef[] = [
     ult: {
       name: "SPATIAL REND", gainDealt: 0.95, gainTaken: 0.6,
       fire(f, e) {
+        // three vertical rends sweep across the target, biggest last
         const t = e.nearestEnemy(f);
-        const x = t ? t.x : ARENA_X + ARENA_SIZE / 2;
-        e.fireBeam(f, x, ARENA_Y, Math.PI / 2, ARENA_SIZE, 110, 20, 0xaef0ff);
+        const x0 = t ? t.x : ARENA_X + ARENA_SIZE / 2;
+        [-90, 90, 0].forEach((off, i) => {
+          e.schedule(0.12 + i * 0.22, () => {
+            const tt = e.nearestEnemy(f);
+            const x = (i === 2 && tt ? tt.x : x0 + off);
+            e.fireBeam(f, x, ARENA_Y, Math.PI / 2, ARENA_SIZE, i === 2 ? 130 : 70, i === 2 ? 14 : 8, 0xaef0ff);
+          });
+        });
       },
     },
     onDealHit(f) { f.st.spinMult = Math.min(2, (f.st.spinMult ?? 1) + 0.03); },
@@ -295,9 +302,12 @@ export const ROSTER: CharacterDef[] = [
         f.shieldT = 3; // guaranteed evasion window
         const karma = f.st.karma ?? 0;
         const targets = e.enemies(f);
-        for (const o of targets) {
-          e.fireBeam(f, o.x, ARENA_Y, Math.PI / 2, ARENA_SIZE, 44, Math.max(6, karma / Math.max(1, targets.length)), 0xf5f0e0);
-        }
+        targets.forEach((o, i) => {
+          e.schedule(0.15 + i * 0.18, () => {
+            if (!o.alive) return;
+            e.fireBeam(f, o.x, ARENA_Y, Math.PI / 2, ARENA_SIZE, 44, Math.max(6, karma / Math.max(1, targets.length)), 0xf5f0e0);
+          });
+        });
         f.st.karma = 0;
       },
     },
@@ -325,12 +335,18 @@ export const ROSTER: CharacterDef[] = [
     ult: {
       name: "BATTLE TRANCE", gainDealt: 1.0, gainTaken: 0.75,
       fire(f, e) {
-        const t = e.nearestEnemy(f);
-        if (!t) return;
-        const a = e.rng.range(0, Math.PI * 2);
-        Matter.Body.setPosition(f.body, { x: t.x + Math.cos(a) * (t.def.radius + f.def.radius + 8), y: t.y + Math.sin(a) * (t.def.radius + f.def.radius + 8) });
-        e.burst(f.x, f.y, 18, 0x3c3c14, 300);
-        for (let i = 0; i < 3; i++) e.dealDamage(f, t, f.st.damage * 2.5, { color: 0xffe259 });
+        // vanish in smoke... reappear behind them... three-hit flurry
+        e.burst(f.x, f.y, 16, 0x3c3c14, 260);
+        e.schedule(0.25, () => {
+          const t = e.nearestEnemy(f);
+          if (!t || !f.alive) return;
+          const a = e.rng.range(0, Math.PI * 2);
+          Matter.Body.setPosition(f.body, { x: t.x + Math.cos(a) * (t.def.radius + f.def.radius + 8), y: t.y + Math.sin(a) * (t.def.radius + f.def.radius + 8) });
+          e.burst(f.x, f.y, 18, 0x3c3c14, 300);
+          for (let i = 0; i < 3; i++) {
+            e.schedule(0.08 + i * 0.12, () => { if (t.alive && f.alive) e.dealDamage(f, t, f.st.damage * 2.5, { color: 0xffe259 }); });
+          }
+        });
       },
     },
     modDamage(f, base, e) {
@@ -393,10 +409,18 @@ export const ROSTER: CharacterDef[] = [
     ult: {
       name: "CATACLYSM", gainDealt: 0.85, gainTaken: 0.7,
       fire(f, e) {
-        for (let i = 0; i < 14; i++) {
-          const a = e.rng.range(0, Math.PI * 2);
-          e.spawnProjectile(f, "nail", f.x + Math.cos(a) * (f.def.radius + 30), f.y + Math.sin(a) * (f.def.radius + 30), a,
-            { speed: e.rng.range(800, 1100), dmg: f.st.damage * 1.6, l: e.rng.range(300, 480), w: 12, color: 0xc7ccd6, life: 3 });
+        // the sky falls in three waves of giant nails
+        for (let wave = 0; wave < 3; wave++) {
+          e.schedule(0.1 + wave * 0.3, () => {
+            if (!f.alive) return;
+            for (let i = 0; i < 5; i++) {
+              const a = e.rng.range(0, Math.PI * 2);
+              e.spawnProjectile(f, "nail", f.x + Math.cos(a) * (f.def.radius + 30), f.y + Math.sin(a) * (f.def.radius + 30), a,
+                { speed: e.rng.range(700, 1000), dmg: f.st.damage * 1.6, l: e.rng.range(300, 480), w: 12, color: 0xc7ccd6, life: 3 });
+            }
+            e.shake = 14;
+            Sound.dash();
+          });
         }
       },
     },
@@ -437,7 +461,7 @@ export const ROSTER: CharacterDef[] = [
         const t = e.nearestEnemy(f);
         if (t) {
           const a = Math.atan2(t.y - f.y, t.x - f.x);
-          Matter.Body.setVelocity(f.body, { x: Math.cos(a) * 1400, y: Math.sin(a) * 1400 });
+          Matter.Body.setVelocity(f.body, { x: Math.cos(a) * 900 * VEL, y: Math.sin(a) * 900 * VEL });
         }
         Sound.dash();
       },
@@ -453,7 +477,18 @@ export const ROSTER: CharacterDef[] = [
     ult: {
       name: "HEAVEN BINDING", gainDealt: 0.8, gainTaken: 0.7,
       fire(f, e) {
-        for (let i = 0; i < 8; i++) e.spawnGate(f, f.st.damage * 1.6);
+        // gates open row by row across the top of the arena, then volley
+        for (let row = 0; row < 2; row++) {
+          for (let col = 0; col < 4; col++) {
+            e.schedule(0.1 + row * 0.25 + col * 0.06, () => {
+              if (!f.alive) return;
+              e.spawnGateAt(f,
+                ARENA_X + ARENA_SIZE * (0.2 + col * 0.2),
+                ARENA_Y + ARENA_SIZE * (0.14 + row * 0.16),
+                f.st.damage * 1.9);
+            });
+          }
+        }
         f.st.gate = (f.st.gate ?? 0) + 8;
       },
     },
@@ -537,9 +572,14 @@ export const ROSTER: CharacterDef[] = [
     ult: {
       name: "THUNDERCALL", gainDealt: 0.9, gainTaken: 0.7,
       fire(f, e) {
-        for (const o of e.enemies(f)) {
-          e.fireBeam(f, o.x, ARENA_Y, Math.PI / 2, o.y - ARENA_Y + 30, 34, 12, 0xfff3a8);
-        }
+        // storm clouds gather, then bolts strike each enemy in sequence
+        e.enemies(f).forEach((o, i) => {
+          e.schedule(0.2 + i * 0.15, () => {
+            if (!o.alive) return;
+            e.fireBeam(f, o.x, ARENA_Y, Math.PI / 2, o.y - ARENA_Y + 30, 34, 12, 0xfff3a8);
+            e.burst(o.x, o.y, 12, 0xfff3a8, 260);
+          });
+        });
       },
     },
     onDealHit(f, t, e, dmg) {

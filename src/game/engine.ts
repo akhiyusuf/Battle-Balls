@@ -1,7 +1,7 @@
 import Matter from "matter-js";
 import { Fighter, tagOf, CAT_PROJ, CAT_WALL, CAT_BALL } from "./fighter";
 import type { BodyTag } from "./fighter";
-import { ARENA_SIZE, ARENA_X, ARENA_Y, HIT_COOLDOWN, METER_MAX, STEP } from "./constants";
+import { ARENA_SIZE, ARENA_X, ARENA_Y, HIT_COOLDOWN, METER_MAX, STEP, VEL } from "./constants";
 import { Rng } from "./rng";
 import { Sound } from "./audio";
 import { getChar } from "./characters";
@@ -63,6 +63,12 @@ export class Engine {
   time = 0;
   /** WORLD STASIS time-stop overlay timer. */
   stasisT = 0;
+  /** Who cast the running WORLD STASIS (rendered as a ghost outline). */
+  stasisCaster: Fighter | null = null;
+  /** Progressive dagger-throw animation that runs DURING the time-stop. */
+  private stasisCast: { owner: Fighter; count: number; thrown: number; interval: number; timer: number } | null = null;
+  /** Scheduled one-shot actions (sim-time; naturally pause during a time-stop). */
+  private actions: { t: number; fn: () => void }[] = [];
   phase: MatchPhase = "intro";
   phaseT = 0;
   winners: Fighter[] = [];
@@ -139,8 +145,8 @@ export class Engine {
   aimLead(x: number, y: number, target: Fighter, projSpeed: number): number {
     const d = Math.hypot(target.x - x, target.y - y);
     const t = d / projSpeed;
-    const px = target.x + target.body.velocity.x * t * 0.85;
-    const py = target.y + target.body.velocity.y * t * 0.85;
+    const px = target.x + target.body.velocity.x * 60 * t * 0.85;
+    const py = target.y + target.body.velocity.y * 60 * t * 0.85;
     return Math.atan2(py - y, px - x);
   }
 
@@ -240,7 +246,7 @@ export class Engine {
         vy: -90, t: 0, life: 0.6, text: "MISS", color: 0xbdbdc4, crit: false,
       });
       const a = this.rng.range(0, Math.PI * 2);
-      Matter.Body.setVelocity(to.body, { x: Math.cos(a) * to.def.speed * 1.6, y: Math.sin(a) * to.def.speed * 1.6 });
+      Matter.Body.setVelocity(to.body, { x: Math.cos(a) * to.def.speed * 1.6 * VEL, y: Math.sin(a) * to.def.speed * 1.6 * VEL });
       return;
     }
     let dmg = base;
@@ -251,6 +257,15 @@ export class Engine {
     dmg = Math.max(1, Math.round(dmg));
     to.hp -= dmg;
     to.flash = 0.12;
+    if (from) {
+      // punchy knockback away from the attacker
+      const ka = Math.atan2(to.y - from.y, to.x - from.x);
+      const k = Math.min(420, 150 + dmg * 14) * VEL / Math.max(0.6, to.def.massMult ?? 1);
+      Matter.Body.setVelocity(to.body, {
+        x: to.body.velocity.x + Math.cos(ka) * k,
+        y: to.body.velocity.y + Math.sin(ka) * k,
+      });
+    }
     const crit = from ? dmg >= from.st.damage * 1.8 : dmg >= 15;
     this.popups.push({
       x: to.x + this.rng.range(-14, 14), y: to.y - to.def.radius - 10,
@@ -328,7 +343,7 @@ export class Engine {
     }
     // Held daggers hang motionless in the time-stop until released.
     if (opt.held) Matter.Body.setVelocity(body, { x: 0, y: 0 });
-    else Matter.Body.setVelocity(body, { x: Math.cos(angle) * opt.speed, y: Math.sin(angle) * opt.speed });
+    else Matter.Body.setVelocity(body, { x: Math.cos(angle) * opt.speed * VEL, y: Math.sin(angle) * opt.speed * VEL });
     (body.plugin as BodyTag) = { role: "proj" };
     Matter.World.add(this.world, body);
     this.projectiles.push({
@@ -338,9 +353,49 @@ export class Engine {
     });
   }
 
-  /** Freeze the entire arena for `dur` seconds (Stasis's WORLD STASIS). */
-  beginStasis(dur: number) {
+  /** Run fn after `delay` sim-seconds (pauses during a time-stop). */
+  schedule(delay: number, fn: () => void) {
+    this.actions.push({ t: this.time + delay, fn });
+  }
+
+  /**
+   * Freeze the entire arena for `dur` seconds (Stasis's WORLD STASIS).
+   * While frozen, the caster throws `count` daggers one by one — they hang
+   * in the air, each locked onto the opponent's position at the moment it
+   * was thrown, and all launch together when time resumes.
+   */
+  beginStasis(dur: number, owner: Fighter, count: number) {
     this.stasisT = Math.max(this.stasisT, dur);
+    this.stasisCaster = owner;
+    this.stasisCast = {
+      owner, count, thrown: 0,
+      interval: Math.min(0.16, (dur * 0.7) / Math.max(1, count)),
+      timer: 0.25, // beat before the first dagger appears
+    };
+  }
+
+  /** Advance the dagger-throw animation inside the time-stop. */
+  private stepStasisCast(dtReal: number) {
+    const c = this.stasisCast;
+    if (!c || !c.owner.alive) return;
+    c.timer -= dtReal;
+    if (c.timer <= 0 && c.thrown < c.count) {
+      c.timer = c.interval;
+      c.thrown++;
+      const f = c.owner;
+      const target = this.nearestEnemy(f);
+      // daggers materialize scattered around Stasis...
+      const around = this.rng.range(0, Math.PI * 2);
+      const ring = f.def.radius + this.rng.range(40, 150);
+      const sx = f.x + Math.cos(around) * ring;
+      const sy = f.y + Math.sin(around) * ring;
+      // ...each locked onto the opponent's (frozen) position right now
+      const aim = target ? Math.atan2(target.y - sy, target.x - sx) : around;
+      this.spawnProjectile(f, "dagger", sx, sy, aim,
+        { speed: 950, dmg: f.st.damage * 1.5, l: 52, w: 13, color: 0xcdeefc, life: 3.5, held: true });
+      this.burst(sx, sy, 4, 0xdff4ff, 120);
+      Sound.clash();
+    }
   }
 
   /** Release every held dagger along its locked direction when the time-stop ends. */
@@ -351,15 +406,22 @@ export class Engine {
       p.held = false;
       any = true;
       const a = p.lockAngle ?? 0, s = p.lockSpeed ?? 700;
-      Matter.Body.setVelocity(p.body, { x: Math.cos(a) * s, y: Math.sin(a) * s });
+      Matter.Body.setVelocity(p.body, { x: Math.cos(a) * s * VEL, y: Math.sin(a) * s * VEL });
     }
+    this.stasisCaster = null;
+    this.stasisCast = null;
     if (any) { Sound.dash(); this.shake = 16; }
   }
 
   spawnGate(owner: Fighter, dmg: number) {
     const m = 90;
-    const x = this.rng.range(ARENA_X + m, ARENA_X + ARENA_SIZE - m);
-    const y = this.rng.range(ARENA_Y + m, ARENA_Y + ARENA_SIZE - m);
+    this.spawnGateAt(owner,
+      this.rng.range(ARENA_X + m, ARENA_X + ARENA_SIZE - m),
+      this.rng.range(ARENA_Y + m, ARENA_Y + ARENA_SIZE - m), dmg);
+  }
+
+  /** Open a summoning gate at an exact position (Tyrant's tiled ult rows). */
+  spawnGateAt(owner: Fighter, x: number, y: number, dmg: number) {
     const target = this.nearestEnemy(owner);
     const angle = target ? Math.atan2(target.y - y, target.x - x) : this.rng.range(0, Math.PI * 2);
     this.gates.push({ x, y, angle, t: 0, fireAt: 0.55, life: 1.0, color: owner.def.color, owner, dmg });
@@ -461,6 +523,7 @@ export class Engine {
     // pause elapses, the held daggers launch along their locked directions.
     if (this.stasisT > 0) {
       this.stasisT -= dtReal;
+      this.stepStasisCast(dtReal);
       if (this.stasisT <= 0) { this.stasisT = 0; this.releaseHeld(); }
       this.updateFx(dtReal);
       return;
@@ -476,6 +539,12 @@ export class Engine {
 
   private step(dt: number) {
     this.time += dt;
+
+    if (this.actions.length) {
+      const due = this.actions.filter(a => a.t <= this.time);
+      this.actions = this.actions.filter(a => a.t > this.time);
+      for (const a of due) a.fn();
+    }
 
     for (const [k, v] of this.clashCd) { if (v - dt <= 0) this.clashCd.delete(k); else this.clashCd.set(k, v - dt); }
     for (const [k, v] of this.bodyCd) { if (v - dt <= 0) this.bodyCd.delete(k); else this.bodyCd.set(k, v - dt); }
@@ -511,19 +580,19 @@ export class Engine {
           const d = Math.hypot(dx, dy) || 1;
           const ax = dx / d, ay = dy / d;
           const wob = Math.sin(this.time * 2 + f.id * 1.3) * 0.42;
-          const accel = 2600; // px/s² — strong enough to reel them back within a few px
-          let vx = f.body.velocity.x + (ax - ay * wob) * accel * dt;
-          let vy = f.body.velocity.y + (ay + ax * wob) * accel * dt;
+          const accel = 900; // px/s²
+          let vx = f.body.velocity.x * 60 + (ax - ay * wob) * accel * dt;
+          let vy = f.body.velocity.y * 60 + (ay + ax * wob) * accel * dt;
           const sp = Math.hypot(vx, vy) || 1;
           if (sp > cruise) { vx = (vx / sp) * cruise; vy = (vy / sp) * cruise; }
-          Matter.Body.setVelocity(f.body, { x: vx, y: vy });
+          Matter.Body.setVelocity(f.body, { x: vx * VEL, y: vy * VEL });
         }
       }
 
       // drive weapon
       if (f.def.weapon.kind === "gun") {
         const t = this.nearestEnemy(f);
-        if (t) f.aimWeapon(t.x, t.y, dt);
+        if (t) f.aimWeapon(t.x, t.y);
       } else {
         f.driveWeapon(dt, f.def.spin * (f.st.spinMult ?? 1));
       }
@@ -564,7 +633,7 @@ export class Engine {
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
           const na = cur + Math.max(-p.turn * dt, Math.min(p.turn * dt, diff));
-          Matter.Body.setVelocity(p.body, { x: Math.cos(na) * p.speed, y: Math.sin(na) * p.speed });
+          Matter.Body.setVelocity(p.body, { x: Math.cos(na) * p.speed * VEL, y: Math.sin(na) * p.speed * VEL });
         }
       }
     }

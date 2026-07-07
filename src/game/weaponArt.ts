@@ -2,151 +2,298 @@ import { Graphics } from "pixi.js";
 import type { CharacterDef } from "./types";
 
 /**
- * Draws a weapon in body-local coordinates (centered on the physics body,
- * pointing along +x). Flat colors + dark outlines, Ball Thing style.
+ * Pixel-art weapon sprites, Ball Thing style: chunky pixels, hard dark
+ * outlines, 2–3 shades per material, bright edge highlights.
+ *
+ * Each sprite is a map of rows; every character is a palette key and '.' is
+ * transparent. Sprites point RIGHT (+x) and are drawn centered on the physics
+ * body's center, sized so the sprite width matches the weapon's length.
  */
+
+type Pal = Record<string, number>;
+
+const OUT = 0x23262e;      // outline
+const STEEL = 0xd9dfe9;    // blade light
+const STEEL2 = 0x9ba6b6;   // blade shade
+const SHINE = 0xffffff;
+const WOOD = 0x8a5c33;
+const WOOD2 = 0x5f3e20;
+
+function drawMap(g: Graphics, rows: string[], pal: Pal, size: number) {
+  const h = rows.length;
+  const w = rows[0].length;
+  const ox = -(w * size) / 2;
+  const oy = -(h * size) / 2;
+  for (let y = 0; y < h; y++) {
+    const row = rows[y];
+    for (let x = 0; x < w; x++) {
+      const c = row[x];
+      if (c === ".") continue;
+      const col = pal[c];
+      if (col === undefined) continue;
+      g.rect(ox + x * size, oy + y * size, size + 0.5, size + 0.5).fill(col);
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* sprite maps                                                          */
+/* ------------------------------------------------------------------ */
+
+const GREATSWORD = [
+  "........###......................",
+  "..###...#C#......................",
+  ".#PP#...#C#######################",
+  ".#P.#####C#SSSSSSSSSSSSSSSSSS##..",
+  ".#P.GgGg#C#wwwwwwwwwwwwwwwwwSS#..",
+  ".#P.#####C#ssssssssssssssssss##..",
+  ".#PP#...#C#######################",
+  "..###...#C#......................",
+  "........###......................",
+];
+const KATANA = [
+  "............####.................",
+  "...........##CC##................",
+  ".#######...#C##C################.",
+  ".#GgGgG#####C##C#SSSSSSSSSSSSS##.",
+  ".#gGgGg#...#C##C#wwwwwwwwwwwwSS#.",
+  ".#######...#C##C###############..",
+  "...........##CC##................",
+  "............####.................",
+];
+const AXE = [
+  "..................###.......",
+  ".................#CCC##.....",
+  ".................#CCCC##....",
+  ".................#CCCCC#....",
+  ".................#CCCCC##...",
+  ".######..........#CCCCSw#...",
+  ".#hHhH############CCCCSSw#..",
+  ".#HhHhWWWWWWWWWWWWCCCCSSw#..",
+  ".#hHhH############CCCCSSw#..",
+  ".................#CCCCSw#...",
+  ".................#CCCCC##...",
+  ".................#CCCCC#....",
+  ".................#CCCC##....",
+  ".................#CCC##.....",
+  "..................###.......",
+];
+const CHAINSAW = [
+  "...#..#..#..#..#..#..#..#..#....",
+  "..#################a#########...",
+  ".##sssssssssssssssssssssssss##..",
+  ".#sRRsSSSSSSSsRRsSSSSSSSSsRRs#..",
+  "##sRRsSSSSSSSsRRsSSSSSSSSsRRs##.",
+  ".#sRRsSSSSSSSsRRsSSSSSSSSsRRs#..",
+  ".##sssssssssssssssssssssssss##..",
+  "..#################a#########...",
+  "...#..#..#..#..#..#..#..#..#....",
+];
+const STAFF = [
+  "..................................",
+  "#####============================#",
+  "#GgG#RRRRRRRRRRRRRRRRRRRRRR#GgG##.",
+  "#gGg#RrRrRrRrRrRrRrRrRrRrRr#gGg##.",
+  "#GgG#RRRRRRRRRRRRRRRRRRRRRR#GgG##.",
+  "#####============================#",
+  "..................................",
+];
+const REVOLVER = [
+  "..................",
+  ".####.............",
+  ".#ss############..",
+  ".#sSSSSSSSSSSSSs#.",
+  ".#ss##CCCC#####s#.",
+  "..#G##CCCC#.......",
+  "..#GG#####........",
+  "..#GGG#...........",
+  "..#GGG#...........",
+  "...####...........",
+];
+const RAILGUN = [
+  "....................",
+  ".####..####..####...",
+  ".#CC####CC####CC###.",
+  "##nnnnnnnnnnnnnnnnn#",
+  "#nwwwwwwwwwwwwwwwwb#",
+  "##nnnnnnnnnnnnnnnnn#",
+  ".#CC####CC####CC###.",
+  ".####..####..####...",
+  "....................",
+];
+const RAPIER = [
+  "......####......................",
+  ".....#CCCC#.....................",
+  ".####*CCCC######################",
+  ".#GgG*CC.CC#SSSSSSSSSSSSSSSSSS#.",
+  ".####*CCCC######################",
+  ".....#CCCC#.....................",
+  "......####......................",
+];
+const KNIFE = [
+  "..................",
+  ".#######..........",
+  ".#GGGGG###########",
+  ".#GgGgG#SSSSSSSS##",
+  ".#GGGGG#SSwwwwwSS#",
+  ".#######SSSSSSS##.",
+  "........########..",
+  "..................",
+];
+const WAND = [
+  "................####....",
+  "..............##CCCC##..",
+  ".............#CC#wwCCC#.",
+  ".############CCCCCCCCCC#",
+  ".#VvVvVvVvVv#CCCCCCCCCC#",
+  ".############.#CCCCCC#..",
+  "................#CCC#...",
+  ".................#C#....",
+  "..................#.....",
+];
+const ICEBLADE = [
+  "...........................",
+  ".#####.....................",
+  ".#DdD######################",
+  ".#dDd#IIIIiiIIIIIIiiIII##..",
+  ".#DdD#wwIIIIIIwwIIIIIIII#..",
+  ".#dDd#iiIIIIIIIIIIIIII##...",
+  ".#####################.....",
+  "...........................",
+];
+const GAVEL = [
+  "..................######....",
+  "..................#CCCC#....",
+  ".................##HHHH##...",
+  ".................#HwwwwH#...",
+  ".#####............#HHHH#....",
+  ".#WwW#############HHHHHH#...",
+  ".#wWwWWWWWWWWWWWWWHHHHHH#...",
+  ".#WwW#############HHHHHH#...",
+  ".#####............#HHHH#....",
+  ".................#HwwwwH#...",
+  ".................##HHHH##...",
+  "..................#CCCC#....",
+  "..................######....",
+];
+const GOLDSWORD = [
+  "........###.....................",
+  "..###...#C#.....................",
+  ".#CC#..##C##....................",
+  ".#C.####CCC##GGGGG##GGGGG##GG##.",
+  ".#C.gGgG#C#GgwwwwwGGwwwwwGGwG##.",
+  ".#C.####CCC##GGGGG##GGGGG##GG##.",
+  ".#CC#..##C##....................",
+  "..###...#C#.....................",
+  "........###.....................",
+];
+const BOLT = [
+  "............................",
+  ".#####......................",
+  ".#CcC###....................",
+  ".#cCc#YY####................",
+  ".#CcC#YYYYYY####............",
+  ".#cCc#wwYYYYYYYY####........",
+  ".#CcC#YYYYwwwwYYYYYY####....",
+  ".#cCc#..####YYYYwwwwYYYY##..",
+  ".#CcC#......####YYYYYYYY#...",
+  ".#####..........####YY##....",
+  "..................####......",
+];
+const SHURIKEN = [
+  "...#...",
+  "..#S#..",
+  ".#SsS#.",
+  "#SsCsS#",
+  ".#SsS#.",
+  "..#S#..",
+  "...#...",
+];
+
+/* ------------------------------------------------------------------ */
+
 export function drawWeaponGraphic(def: CharacterDef): Graphics {
   const g = new Graphics();
   const w = def.weapon;
   const C = def.color, D = def.dark;
 
+  const base: Pal = {
+    "#": OUT, S: STEEL, s: STEEL2, w: SHINE,
+    W: WOOD, // wood light
+    C, D,
+  };
+
   switch (w.kind) {
     case "blade": {
-      const L = w.length, W = w.width, x0 = -L / 2;
+      const L = w.length;
       switch (w.style) {
         case "sword":
-        case "greatsword": {
-          const bladeStart = x0 + L * 0.22, tip = L / 2;
-          // pommel
-          g.circle(x0, 0, W * 0.42).fill(C).stroke({ width: 3, color: D });
-          // wrapped grip
-          g.rect(x0, -W * 0.22, L * 0.18, W * 0.44).fill(0x5a3d26).stroke({ width: 3, color: D });
-          for (let i = 1; i < 4; i++) g.moveTo(x0 + L * 0.045 * i, -W * 0.22).lineTo(x0 + L * 0.045 * i, W * 0.22).stroke({ width: 1.5, color: 0x2e1e12 });
-          // crossguard with beveled ends
-          g.poly([x0 + L * 0.16, -W * 1.0, x0 + L * 0.23, -W * 0.72, x0 + L * 0.23, W * 0.72, x0 + L * 0.16, W * 1.0])
-            .fill(C).stroke({ width: 3, color: D });
-          // steel blade, tapered to a point
-          g.poly([
-            bladeStart, -W * 0.55, tip - W * 1.0, -W * 0.5, tip, 0,
-            tip - W * 1.0, W * 0.5, bladeStart, W * 0.55,
-          ]).fill(0xd7dce6).stroke({ width: 3.5, color: D });
-          // bright edges + central fuller
-          g.moveTo(bladeStart, -W * 0.42).lineTo(tip - W * 1.1, -W * 0.38).stroke({ width: 2, color: 0xffffff });
-          g.moveTo(bladeStart + L * 0.02, 0).lineTo(tip - W * 1.2, 0).stroke({ width: 2, color: 0x9aa2b2 });
+          drawMap(g, GOLDSWORD, { ...base, G: 0xe8c458, g: 0x8a6a1a, c: shade(C, -30) }, L / 30);
           break;
-        }
-        case "katana": {
-          const guard = x0 + L * 0.2, tip = L / 2;
-          // dark bound handle
-          g.rect(x0, -W * 0.2, L * 0.2, W * 0.4).fill(0x1f2228).stroke({ width: 3, color: D });
-          for (let i = 1; i < 4; i++) g.moveTo(x0 + L * 0.05 * i, -W * 0.2).lineTo(x0 + L * 0.05 * i, W * 0.2).stroke({ width: 1.5, color: 0x0e0f13 });
-          // round tsuba guard
-          g.circle(guard, 0, W * 0.62).fill(0xc9a44a).stroke({ width: 3, color: D });
-          // single-edged curved blade (gentle upward curve)
-          g.poly([
-            guard, -W * 0.34, tip - W * 1.2, -W * 0.62, tip, -W * 0.18,
-            tip - W * 1.1, W * 0.05, guard, W * 0.3,
-          ]).fill(0xeef2f8).stroke({ width: 3, color: D });
-          // hamon edge line
-          g.moveTo(guard + L * 0.02, -W * 0.22).lineTo(tip - W * 1.1, -W * 0.46).stroke({ width: 2, color: 0xffffff });
+        case "greatsword":
+          drawMap(g, GREATSWORD, { ...base, P: C, G: WOOD, g: WOOD2 }, L / 30);
           break;
-        }
-        case "axe": {
-          const hx = L / 2 - W * 0.5;
-          // wooden haft
-          g.rect(x0, -W * 0.16, L * 0.95, W * 0.32).fill(0x7a5230).stroke({ width: 3, color: D });
-          g.rect(x0, -W * 0.16, L * 0.95, W * 0.1).fill(0x94663d); // top highlight
-          // big crescent axe head
-          g.poly([
-            hx - W * 0.4, -W * 1.35, hx + W * 0.9, -W * 0.75,
-            hx + W * 1.05, 0, hx + W * 0.9, W * 0.75, hx - W * 0.4, W * 1.35,
-            hx + W * 0.15, 0,
-          ]).fill(C).stroke({ width: 3.5, color: D });
-          // bright cutting edge
-          g.moveTo(hx + W * 0.9, -W * 0.72).lineTo(hx + W * 1.02, 0).lineTo(hx + W * 0.9, W * 0.72).stroke({ width: 2.5, color: 0xffffff });
-          // top spike
-          g.poly([hx - W * 0.1, -W * 1.3, hx + W * 0.25, -W * 1.85, hx + W * 0.35, -W * 1.2]).fill(C).stroke({ width: 2.5, color: D });
+        case "katana":
+          drawMap(g, KATANA, { ...base, G: 0x2a2d36, g: 0x14161c, C: 0xc9a44a }, L / 30);
           break;
-        }
-        case "dagger": {
-          g.rect(x0, -W * 0.3, L * 0.28, W * 0.6).fill(0x3a3f4d).stroke({ width: 3, color: D });
-          g.poly([x0 + L * 0.3, -W * 0.5, L / 2 - W * 0.5, -W * 0.2, L / 2, 0, L / 2 - W * 0.5, W * 0.2, x0 + L * 0.3, W * 0.5])
-            .fill(0xd8dce4).stroke({ width: 3, color: D });
+        case "axe":
+          drawMap(g, AXE, { ...base, H: WOOD, h: WOOD2, W: WOOD }, L / 30);
           break;
-        }
-        case "rapier": {
-          g.circle(x0 + L * 0.13, 0, W * 0.8).fill(C).stroke({ width: 3, color: D });
-          g.rect(x0, -W * 0.2, L * 0.14, W * 0.4).fill(0x3a3f4d).stroke({ width: 2, color: D });
-          g.rect(x0 + L * 0.2, -W * 0.14, L * 0.78, W * 0.28).fill(0xe4e7ee).stroke({ width: 2.5, color: D });
+        case "dagger":
+          drawMap(g, KNIFE, { ...base, G: 0x4a3b2a, g: 0x2e2418 }, L / 16);
           break;
-        }
-        case "hammer": {
-          g.rect(x0, -W * 0.14, L * 0.8, W * 0.28).fill(0x8a6a45).stroke({ width: 3, color: D });
-          g.rect(L / 2 - W * 1.15, -W * 0.85, W * 1.3, W * 1.7).fill(C).stroke({ width: 3.5, color: D });
+        case "rapier":
+          drawMap(g, RAPIER, { ...base, G: 0x3a3f4d, g: 0x23262e, "*": shade(C, -35) }, L / 30);
           break;
-        }
-        case "scythe": {
-          g.rect(x0, -W * 0.15, L * 0.9, W * 0.3).fill(0x5c5468).stroke({ width: 3, color: D });
-          g.poly([L / 2 - W * 0.4, -W * 1.4, L / 2 + W * 0.5, -W * 0.4, L / 2 - W * 0.1, W * 0.1, L / 2 - W * 0.8, -W * 0.5])
-            .fill(0xd8dce4).stroke({ width: 3, color: D });
+        case "wand":
+          drawMap(g, WAND, { ...base, V: 0x7a4a68, v: 0x54324a }, L / 22);
           break;
-        }
-        case "wand": {
-          g.rect(x0, -W * 0.18, L * 0.82, W * 0.36).fill(0x8a5a7a).stroke({ width: 3, color: D });
-          heart(g, L / 2 - W * 0.2, 0, W * 1.05, C, D);
+        case "iceblade":
+          drawMap(g, ICEBLADE, { ...base, I: 0xcdeefc, i: 0x9fd8e8, D: 0x6ea8bc, d: 0x548ba0, "#": 0x2e6474 }, L / 24);
           break;
-        }
-        case "iceblade": {
-          g.poly([x0, -W * 0.25, L / 2 - W, -W * 0.55, L / 2, 0, L / 2 - W, W * 0.55, x0, W * 0.25])
-            .fill(0xcdeefc).stroke({ width: 3, color: D });
-          g.moveTo(x0 + L * 0.2, 0).lineTo(L / 2 - W * 1.2, 0).stroke({ width: 2, color: 0x9fd8ef });
+        case "gavel":
+          drawMap(g, GAVEL, { ...base, H: 0x9a7448, h: 0x6b4a2f, C: 0xf0ead8, W: WOOD }, L / 26);
           break;
-        }
-        case "gavel": {
-          g.rect(x0, -W * 0.15, L * 0.78, W * 0.3).fill(0x7a5a3a).stroke({ width: 3, color: D });
-          g.rect(L / 2 - W * 1.05, -W * 0.75, W * 1.25, W * 1.5).fill(0x9a7448).stroke({ width: 3.5, color: D });
-          g.rect(L / 2 - W * 1.18, -W * 0.85, W * 0.22, W * 1.7).fill(C).stroke({ width: 2, color: D });
-          g.rect(L / 2 + W * 0.05, -W * 0.85, W * 0.22, W * 1.7).fill(C).stroke({ width: 2, color: D });
+        case "chainsaw":
+          drawMap(g, CHAINSAW, { ...base, R: 0xd33b2f, r: 0x8f1f16, a: OUT, s: 0x6f7b8c, S: 0x9aa5b5 }, L / 30);
           break;
-        }
-        case "chainsaw": {
-          // gray bar with zigzag tooth outline + sprocket hubs (Shredder)
-          g.roundRect(x0, -W * 0.5, L, W, W * 0.5).fill(0x8d99ae).stroke({ width: 4, color: 0x1e222b });
-          const teeth = 9;
-          for (let i = 0; i < teeth; i++) {
-            const tx = x0 + (i + 0.5) * (L / teeth);
-            g.poly([tx - 5, -W * 0.5 - 1, tx, -W * 0.5 - 8, tx + 5, -W * 0.5 - 1]).fill(0x1e222b);
-            g.poly([tx - 5, W * 0.5 + 1, tx, W * 0.5 + 8, tx + 5, W * 0.5 + 1]).fill(0x1e222b);
-          }
-          for (const hx of [x0 + L * 0.08, 0, x0 + L * 0.92]) {
-            g.poly([hx - 8, 0, hx, -8, hx + 8, 0, hx, 8]).fill(0xd33b2f).stroke({ width: 2, color: 0x1e222b });
-            g.circle(hx, 0, 2.6).fill(0x1e222b);
-          }
+        case "bolt":
+          drawMap(g, BOLT, { ...base, Y: 0xf6d33c, y: 0xc9a41a, c: shade(C, -30) }, L / 26);
           break;
-        }
-        case "bolt": {
-          g.poly([x0, -W * 0.2, x0 + L * 0.4, -W * 0.55, x0 + L * 0.35, -W * 0.1,
-            L / 2, -W * 0.3, x0 + L * 0.5, W * 0.5, x0 + L * 0.55, W * 0.05, x0, W * 0.25])
-            .fill(C).stroke({ width: 3, color: D });
+        case "hammer":
+        case "scythe":
+          // fallback chunky bar for unused styles
+          drawMap(g, KNIFE, { ...base, G: 0x4a3b2a, g: 0x2e2418 }, L / 16);
           break;
-        }
       }
       break;
     }
     case "gun": {
-      const L = w.length, W = w.width, x0 = -L / 2;
+      const L = w.length;
       if (w.style === "revolver") {
-        g.rect(x0, W * 0.1, L * 0.22, W * 0.75).fill(0x7a5230).stroke({ width: 3, color: D }); // grip
-        g.rect(x0 + L * 0.14, -W * 0.42, L * 0.86, W * 0.62).fill(0x4a505e).stroke({ width: 3, color: D }); // frame+barrel
-        g.roundRect(x0 + L * 0.3, -W * 0.55, L * 0.24, W * 0.9, 4).fill(0x394050).stroke({ width: 3, color: D }); // cylinder
-        g.rect(L / 2 - L * 0.1, -W * 0.5, L * 0.1, W * 0.24).fill(0x4a505e).stroke({ width: 2, color: D }); // sight
+        drawMap(g, REVOLVER, { ...base, G: 0x6b4326, C: 0x4a505e }, L / 16);
       } else {
-        g.rect(x0, -W * 0.3, L, W * 0.6).fill(0x46506b).stroke({ width: 3, color: D });
-        for (let i = 0; i < 4; i++) {
-          const cx = x0 + L * (0.3 + i * 0.16);
-          g.rect(cx, -W * 0.5, L * 0.06, W).fill(C).stroke({ width: 2, color: D });
-        }
-        g.rect(L / 2 - L * 0.08, -W * 0.18, L * 0.08, W * 0.36).fill(0x9fd8ef);
+        drawMap(g, RAILGUN, { ...base, n: 0x39405a, b: 0x9fd8ff }, L / 18);
+      }
+      break;
+    }
+    case "staff": {
+      drawMap(g, STAFF, {
+        "#": 0x2b1a12, "=": 0x2b1a12,
+        R: 0xb32828, r: 0x7c1717,
+        G: 0xe0b53c, g: 0x9c7a1e,
+      }, w.length / 33);
+      break;
+    }
+    case "orbitals": {
+      for (let i = 0; i < w.count; i++) {
+        const a = (i / w.count) * Math.PI * 2;
+        const x = Math.cos(a) * w.dist, y = Math.sin(a) * w.dist;
+        const g2 = new Graphics();
+        drawMap(g2, SHURIKEN, { "#": OUT, S: STEEL, s: STEEL2, C: C }, (w.radius * 2.4) / 7);
+        g2.position.set(x, y);
+        g2.rotation = a;
+        g.addChild(g2);
       }
       break;
     }
@@ -159,34 +306,8 @@ export function drawWeaponGraphic(def: CharacterDef): Graphics {
         const r = i % 2 === 0 ? R : R * 0.82;
         pts.push(Math.cos(a) * r, Math.sin(a) * r);
       }
-      g.poly(pts).fill(0xb8bfcc).stroke({ width: 3.5, color: 0x2a2e38 });
+      g.poly(pts).fill(STEEL2).stroke({ width: 3.5, color: OUT });
       g.circle(0, 0, R * 0.34).fill(C).stroke({ width: 3, color: D });
-      g.circle(0, 0, R * 0.1).fill(0x2a2e38);
-      break;
-    }
-    case "staff": {
-      // Monkey King's Ruyi Jingu Bang: crimson shaft, serrated edges, gold caps
-      const L = w.length, W = w.width, x0 = -L / 2;
-      g.rect(x0, -W / 2, L, W).fill(0xb32828).stroke({ width: 3.5, color: 0x2b1a12 });
-      const notches = Math.max(6, Math.floor(L / 46));
-      for (let i = 0; i < notches; i++) {
-        const nx = x0 + L * 0.18 + (i + 0.5) * ((L * 0.64) / notches);
-        g.poly([nx - 4, -W / 2, nx + 4, -W / 2, nx, -W / 2 - 6]).fill(0x2b1a12);
-        g.poly([nx - 4, W / 2, nx + 4, W / 2, nx, W / 2 + 6]).fill(0x2b1a12);
-      }
-      for (const [cx, cw] of [[x0, L * 0.14], [L / 2 - L * 0.14, L * 0.14]] as const) {
-        g.rect(cx, -W / 2 - 3, cw, W + 6).fill(0xe0b53c).stroke({ width: 3, color: 0x2b1a12 });
-        g.moveTo(cx + cw / 2, -W / 2 - 3).lineTo(cx + cw / 2, W / 2 + 3).stroke({ width: 2, color: 0x8f6a1a });
-      }
-      break;
-    }
-    case "orbitals": {
-      for (let i = 0; i < w.count; i++) {
-        const a = (i / w.count) * Math.PI * 2;
-        const x = Math.cos(a) * w.dist, y = Math.sin(a) * w.dist;
-        g.circle(x, y, w.radius).fill(C).stroke({ width: 3, color: D });
-        g.circle(x - w.radius * 0.25, y - w.radius * 0.25, w.radius * 0.3).fill(0xffffff).stroke({ width: 0, color: 0 });
-      }
       break;
     }
     case "none":
@@ -195,6 +316,15 @@ export function drawWeaponGraphic(def: CharacterDef): Graphics {
   return g;
 }
 
+/** Lighten (+) / darken (-) a color. */
+function shade(hex: number, amt: number): number {
+  const r = Math.max(0, Math.min(255, ((hex >> 16) & 255) + amt));
+  const gg = Math.max(0, Math.min(255, ((hex >> 8) & 255) + amt));
+  const b = Math.max(0, Math.min(255, (hex & 255) + amt));
+  return (r << 16) | (gg << 8) | b;
+}
+
+/** Heart shape used by Magia's projectiles and the hearts theme. */
 export function heart(g: Graphics, x: number, y: number, s: number, color: number, dark: number) {
   g.moveTo(x, y + s * 0.35)
     .bezierCurveTo(x - s, y - s * 0.4, x - s * 0.5, y - s, x, y - s * 0.35)

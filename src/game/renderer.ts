@@ -246,6 +246,10 @@ export class GameRenderer {
       } else {
         v.root.visible = true;
         v.root.position.set(f.x, f.y);
+        // the WORLD STASIS caster turns into a see-through outline during the stop
+        const ghosted = e.stasisT > 0 && e.stasisCaster === f;
+        v.root.alpha = ghosted ? 0.38 : 1;
+        if (v.weapon) v.weapon.alpha = ghosted ? 0.38 : 1;
         v.hpText.text = String(Math.max(0, Math.ceil(f.hp)));
         v.flash.alpha = f.flash > 0 ? Math.min(1, f.flash * 7) : 0;
         v.aura.visible = f.aura !== 0;
@@ -488,6 +492,25 @@ export class GameRenderer {
       this.calloutText.alpha = p < 0.15 ? p / 0.15 : p > 0.75 ? (1 - p) / 0.25 : 1;
       this.calloutText.scale.set(1 + (1 - Math.min(1, p / 0.12)) * 0.6);
     }
+  }
+
+  /** Dev-only: render every weapon sprite in a labeled grid (?weapons=1). */
+  debugWeaponSheet(roster: { name: string; def: any }[]) {
+    this.bgHolder.removeChildren();
+    const bg = new Graphics().rect(0, 0, VIEW_W, VIEW_H).fill(0xe8e5e0);
+    this.bgHolder.addChild(bg);
+    roster.forEach((c, i) => {
+      const col = i % 2, row = Math.floor(i / 2);
+      const x = 280 + col * 520, y = 130 + row * 180;
+      const g = drawWeaponGraphic(c.def);
+      g.position.set(x, y);
+      this.bgHolder.addChild(g);
+      const t = this.makeText(30, c.def.color, c.def.dark, 5);
+      t.text = c.name;
+      t.anchor.set(0.5, 0);
+      t.position.set(x, y + 60);
+      this.bgHolder.addChild(t);
+    });
   }
 
   destroy() {
