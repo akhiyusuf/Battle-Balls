@@ -1,7 +1,8 @@
 # Battle Balls ⚔️ — fight studio
 
 A faithful replica of [Ball Thing](https://ballthing.com)'s physics ball-fight
-simulations (@ballthingsim on TikTok/YouTube), built on **his actual stack**:
+simulations (@ballthingsim on TikTok/YouTube — his upcoming mobile game is
+called **Ball Fight League**), built on **his actual stack**:
 **React + TypeScript** on top of **Pixi.js** (rendering) and **Matter.js**
 (physics) — plus a **studio that exports fights into videos quickly**.
 
@@ -36,21 +37,21 @@ Ult names in **bold** were read directly off the meter bars in his videos.
 | Fighter | Ult | Gimmick |
 | --- | --- | --- |
 | Bladesman | **BLADE RUSH** | damage snowballs per hit (Damage = 2× Spin Speed) |
-| Berserker | WHIRLWIND | rages below 38% HP; ult heals + frenzies |
+| Berserker | **WHIRLWIND** | rages below 38% HP; ult heals + frenzies |
 | Outlaw | **HIGH NOON** | six-shooter with Ammo x/6 + reloads; ult fans the cylinder |
 | Magia | **HEARTBREAK FINALE** | homing heart orbs with AoE bursts |
 | Monkey King | **TRICKSTER CLONE** | growing staff; ult spawns fighting clones |
-| Stasis | **WORLD STASIS** | freeze pulses; every ult permanently quickens her |
+| Stasis | **WORLD STASIS** | time-stop ult (arena grays out); every cast permanently quickens her |
 | Mach | **FULL THROTTLE** | no weapon — pure speed rammer, Damage = 2× Speed |
 | Juggernaut | **GRAVITY WELL** | heavy greatsword tank; ult pulls enemies in |
 | Sword Saint | **SPATIAL REND** | fastest blade; ult drops a giant vertical rend |
-| Judge | **ABSOLUTE EVASION** | Karma + decaying Recovery Rate; bone-beam barrage |
-| Rogue | SHADOWSTRIKE | Crit % ramps; ult teleports behind you |
+| Judge | **ABSOLUTE EVASION** | Sans homage: **1 HP**, dodges via decaying Recovery Rate, Karma barrage |
+| Rogue | **BATTLE TRANCE** | Crit % ramps; ult teleports behind you |
 | Duelist | **SHELLSTORM** | rapier; damage ramps hard per hit |
-| Shredder | **MAELSTROM SAW** | chainsaw; Damage = Lifesteal, both ramp |
+| Shredder | **MAELSTROM SAW** | chainsaw; Damage = Lifesteal, lifesteal overheals past max HP |
 | Sunderer | **CATACLYSM** | arena-spanning nails that pierce and pin |
-| Samurai | IAIJUTSU | radial slash burst + permanent damage surge |
-| Tyrant | **HEAVEN KINGDOM** | summons gates that volley golden blades |
+| Samurai | **DASH** | radial slash burst + permanent damage surge |
+| Tyrant | **HEAVEN BINDING** | summons gates that volley golden blades |
 | Axiom | **HORIZON** | blade-storm wings; Shred stat (Damage = 3× Shred) |
 | Vessel | **DETERMINATION** | flat heavy damage; refuses to fall |
 | Thunderclad | THUNDERCALL | chain lightning; ult strikes every enemy |

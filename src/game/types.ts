@@ -56,6 +56,8 @@ export interface CharacterDef {
   onTakeHit?: (f: Fighter, from: Fighter | null, e: Engine, dmg: number) => void;
   /** Modify outgoing damage (crits, rage...). Returns final damage. */
   modDamage?: (f: Fighter, base: number, e: Engine) => number;
+  /** Chance to fully evade an incoming hit (Judge's Sans-style dodge). */
+  dodge?: (f: Fighter, e: Engine) => boolean;
   /** Live stat readout lines. */
   stats: (f: Fighter) => StatLine[];
 }

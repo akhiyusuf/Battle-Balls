@@ -57,6 +57,8 @@ export class Engine {
   callouts: Callout[] = [];
   shake = 0;
   time = 0;
+  /** WORLD STASIS time-stop overlay timer. */
+  stasisT = 0;
   phase: MatchPhase = "intro";
   phaseT = 0;
   winners: Fighter[] = [];
@@ -227,6 +229,15 @@ export class Engine {
 
   dealDamage(from: Fighter | null, to: Fighter, base: number, opt?: { proj?: boolean; color?: number; noLifesteal?: boolean }) {
     if (!to.alive || base <= 0) return;
+    if (to.def.dodge?.(to, this)) {
+      this.popups.push({
+        x: to.x + this.rng.range(-14, 14), y: to.y - to.def.radius - 10,
+        vy: -90, t: 0, life: 0.6, text: "MISS", color: 0xbdbdc4, crit: false,
+      });
+      const a = this.rng.range(0, Math.PI * 2);
+      Matter.Body.setVelocity(to.body, { x: Math.cos(a) * to.def.speed * 1.6, y: Math.sin(a) * to.def.speed * 1.6 });
+      return;
+    }
     let dmg = base;
     if (from?.def.modDamage) dmg = from.def.modDamage(from, dmg, this);
     if (to.frozen > 0) dmg *= 1.4;
@@ -256,9 +267,11 @@ export class Engine {
     if (to.hp <= 0) this.kill(to);
   }
 
-  heal(f: Fighter, amount: number) {
+  heal(f: Fighter, amount: number, opt?: { overheal?: boolean }) {
     if (!f.alive || amount <= 0) return;
-    f.hp = Math.min(f.maxhp, f.hp + amount);
+    f.hp = f.hp + amount;
+    if (opt?.overheal) f.maxhp = Math.max(f.maxhp, f.hp); // lifesteal can push past max (Shredder hit 331 in his videos)
+    else f.hp = Math.min(f.maxhp, f.hp);
     this.rings.push({ x: f.x, y: f.y, r: f.def.radius, max: f.def.radius + 30, w: 5, color: 0x5ed65e, t: 0, life: 0.35 });
   }
 
@@ -574,6 +587,7 @@ export class Engine {
     for (const c of this.callouts) c.t += dt;
     this.callouts = this.callouts.filter(c => c.t < c.life);
     this.shake = Math.max(0, this.shake - dt * 55);
+    this.stasisT = Math.max(0, this.stasisT - dt);
   }
 
   destroy() {

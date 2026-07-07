@@ -400,6 +400,12 @@ export class GameRenderer {
           .stroke({ width: 4, color: 0xd8f6ff, alpha: 0.8 });
       }
     }
+
+    // WORLD STASIS: the whole arena desaturates during the time stop
+    if (e.stasisT > 0) {
+      g.rect(ARENA_X, ARENA_Y, ARENA_SIZE, ARENA_SIZE)
+        .fill({ color: 0x8a8a92, alpha: Math.min(0.42, e.stasisT * 0.6) });
+    }
   }
 
   private drawPopups(e: Engine) {

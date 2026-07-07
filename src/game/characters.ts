@@ -179,6 +179,7 @@ export const ROSTER: CharacterDef[] = [
           e.burst(o.x, o.y, 14, f.def.color, 200);
         }
         e.ring(f.x, f.y, ARENA_SIZE * 0.7, f.def.color);
+        e.stasisT = 2.4; // gray time-stop overlay
         // each World Stasis permanently quickens her (2.26 -> 3.70 -> 6.00 in his fights)
         f.st.spinMult = (f.st.spinMult ?? 1) * 1.55;
         Sound.freeze();
@@ -271,13 +272,15 @@ export const ROSTER: CharacterDef[] = [
 
   {
     id: "judge", name: "Judge", color: 0xe8e2d4, dark: 0x6b6255, theme: "bones",
-    hp: 180, speed: 265, radius: 44, weapon: { kind: "blade", length: 205, width: 28, style: "gavel" },
-    spin: 3.8, damage: 5,
+    // The Judge is a Sans homage: 1 HP, survives by dodging. His dodge engine
+    // is the Recovery Rate stat, which decays over the fight (15 -> ~3 in his
+    // videos) — eventually one hit gets through.
+    hp: 1, speed: 300, radius: 44, weapon: { kind: "blade", length: 205, width: 28, style: "gavel" },
+    spin: 3.8, damage: 6.5,
     ult: {
-      name: "ABSOLUTE EVASION", gainDealt: 0.5, gainTaken: 1.1,
+      name: "ABSOLUTE EVASION", gainDealt: 0.75, gainTaken: 0,
       fire(f, e) {
-        // Sans-style: dodge everything while the karma barrage lands
-        f.shieldT = 3;
+        f.shieldT = 3; // guaranteed evasion window
         const karma = f.st.karma ?? 0;
         const targets = e.enemies(f);
         for (const o of targets) {
@@ -286,20 +289,20 @@ export const ROSTER: CharacterDef[] = [
         f.st.karma = 0;
       },
     },
-    update(f, _e, dt) {
-      // Recovery Rate starts high and decays over the fight (14.6 -> 7 in his videos)
-      f.st.recovery = Math.max(2, (f.st.recovery ?? 15) - dt * 0.09);
-      f.st.healAcc = (f.st.healAcc ?? 0) + f.st.recovery * dt * 0.055;
-      if (f.st.healAcc >= 1) {
-        const n = Math.floor(f.st.healAcc);
-        f.st.healAcc -= n;
-        if (f.hp < f.maxhp) f.hp = Math.min(f.maxhp, f.hp + n);
-      }
+    update(f, e, dt) {
+      f.st.recovery = Math.max(2.5, (f.st.recovery ?? 15.5) - dt * 0.09);
+      // dodging charges the ult meter too
+      f.gainMeter(dt * 7);
+      void e;
     },
-    onTakeHit(f, _from, _e, dmg) { f.st.karma = Math.min(45, (f.st.karma ?? 0) + dmg * 0.3); },
+    dodge(f, e) {
+      if (f.shieldT > 0) return true;
+      return e.rng.next() < Math.min(0.96, (f.st.recovery ?? 15.5) * 0.063);
+    },
+    onDealHit(f, _t, _e, dmg) { f.st.karma = Math.min(60, (f.st.karma ?? 0) + dmg * 0.9); },
     stats: (f) => [
       { label: "Karma", value: () => f2(f.st.karma ?? 0) },
-      { label: "Recovery Rate", value: () => f2(f.st.recovery ?? 15) },
+      { label: "Recovery Rate", value: () => f2(f.st.recovery ?? 15.5) },
     ],
   },
 
@@ -308,7 +311,7 @@ export const ROSTER: CharacterDef[] = [
     hp: 135, speed: 340, radius: 38, weapon: { kind: "orbitals", count: 3, radius: 17, dist: 74 },
     spin: 6.4, damage: 3.2,
     ult: {
-      name: "SHADOWSTRIKE", gainDealt: 1.0, gainTaken: 0.75,
+      name: "BATTLE TRANCE", gainDealt: 1.0, gainTaken: 0.75,
       fire(f, e) {
         const t = e.nearestEnemy(f);
         if (!t) return;
@@ -363,7 +366,7 @@ export const ROSTER: CharacterDef[] = [
     },
     onDealHit(f, _t, e, dmg) {
       f.st.damage += 0.06; // Damage and Lifesteal ramp together
-      e.heal(f, dmg * 0.45);
+      e.heal(f, dmg * 0.45, { overheal: true });
     },
     stats: (f) => [
       { label: "Damage", value: () => f2(f.st.damage) },
@@ -412,7 +415,7 @@ export const ROSTER: CharacterDef[] = [
     hp: 158, speed: 320, radius: 40, weapon: { kind: "blade", length: 240, width: 20, style: "katana" },
     spin: 5.4, damage: 4,
     ult: {
-      name: "IAIJUTSU", gainDealt: 0.95, gainTaken: 0.65,
+      name: "DASH", gainDealt: 0.95, gainTaken: 0.65,
       fire(f, e) {
         // radial slash burst + a permanent damage surge (5.50 -> 15.00 in his fights)
         for (let i = 0; i < 8; i++) {
@@ -436,7 +439,7 @@ export const ROSTER: CharacterDef[] = [
     hp: 165, speed: 280, radius: 42, weapon: { kind: "blade", length: 150, width: 22, style: "sword" },
     spin: 4.2, damage: 4.2,
     ult: {
-      name: "HEAVEN KINGDOM", gainDealt: 0.8, gainTaken: 0.7,
+      name: "HEAVEN BINDING", gainDealt: 0.8, gainTaken: 0.7,
       fire(f, e) {
         for (let i = 0; i < 8; i++) e.spawnGate(f, f.st.damage * 1.6);
         f.st.gate = (f.st.gate ?? 0) + 8;
@@ -496,7 +499,7 @@ export const ROSTER: CharacterDef[] = [
   {
     id: "vessel", name: "Vessel", color: 0xb03038, dark: 0x4a0d12, theme: "bones",
     hp: 172, speed: 285, radius: 42, weapon: { kind: "blade", length: 195, width: 24, style: "dagger" },
-    spin: 4.6, damage: 5.4,
+    spin: 4.6, damage: 4.5,
     ult: {
       name: "DETERMINATION", gainDealt: 0.45, gainTaken: 1.0,
       fire(f, e) {
@@ -511,6 +514,7 @@ export const ROSTER: CharacterDef[] = [
     update(f) {
       if (f.ultT <= 0 && (f.st.speedMult ?? 1) > 1) { f.st.speedMult = 1; f.aura = 0; }
     },
+    onDealHit(f) { f.st.damage = Math.min(12, f.st.damage + 0.35); },
     stats: (f) => [{ label: "Damage", value: () => f2(f.st.damage) }],
   },
 
