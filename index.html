@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Battle Balls — physics ball fight simulator</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="stage">
+    <canvas id="game" width="540" height="960"></canvas>
+
+    <div id="menu" class="overlay">
+      <h1>BATTLE&nbsp;BALLS</h1>
+      <p class="tag">physics ball fight simulator</p>
+      <div id="rosterGrid"></div>
+      <p class="hint" id="pickHint">Pick fighters (in order), then choose a mode</p>
+      <div class="btnRow">
+        <button id="btnFight">FIGHT</button>
+        <button id="btnRandom">RANDOM 1v1</button>
+        <button id="btn2v2">2 v 2</button>
+        <button id="btnFFA">FREE-FOR-ALL</button>
+      </div>
+      <p class="hint">During a fight: ⏺ records a .webm clip of the battle</p>
+    </div>
+
+    <div id="hud" class="hidden">
+      <button id="btnRec" title="Record clip">⏺</button>
+      <button id="btnMute" title="Toggle sound">🔊</button>
+      <button id="btnBack" title="Back to menu">✕</button>
+    </div>
+  </div>
+
+  <script src="js/util.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/roster.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
