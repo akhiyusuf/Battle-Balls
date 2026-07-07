@@ -18,7 +18,7 @@ export interface Callout { text: string; color: number; t: number; life: number 
 
 export interface Projectile {
   body: Matter.Body;
-  kind: "bullet" | "orb" | "heart" | "nail" | "gateblade";
+  kind: "bullet" | "orb" | "heart" | "nail" | "gateblade" | "dagger";
   team: number;
   owner: Fighter;
   dmg: number;
@@ -31,8 +31,12 @@ export interface Projectile {
   stuck?: boolean;
   /** fighters this piercing projectile already hit. */
   hit?: Set<number>;
-  /** rect length for nail/gateblade rendering. */
+  /** rect length for nail/gateblade/dagger rendering. */
   len?: number;
+  /** WORLD STASIS: dagger hangs frozen until the time-stop ends, then flies. */
+  held?: boolean;
+  lockAngle?: number;
+  lockSpeed?: number;
 }
 
 /** Tyrant-style summoning portal that fires a projectile after a windup. */
@@ -194,7 +198,8 @@ export class Engine {
     // projectile hits
     if (a.role === "proj") {
       const proj = this.projectiles.find(p => p.body === (pair.bodyA.parent ?? pair.bodyA) || p.body === (pair.bodyB.parent ?? pair.bodyB));
-      if (!proj || proj.stuck) return;
+      // Held daggers are inert while frozen in the time-stop — no hits, no dying.
+      if (!proj || proj.stuck || proj.held) return;
       if (b.role === "ball" && b.fighter && b.fighter.alive && b.fighter.team !== proj.team) {
         if (proj.kind === "nail") {
           // nails pierce: hit each fighter once, keep flying
@@ -307,27 +312,48 @@ export class Engine {
   // ---------- spawn helpers for characters ----------
 
   spawnProjectile(owner: Fighter, kind: Projectile["kind"], x: number, y: number, angle: number,
-    opt: { speed: number; dmg: number; r?: number; w?: number; l?: number; color: number; life?: number; turn?: number }) {
+    opt: { speed: number; dmg: number; r?: number; w?: number; l?: number; color: number; life?: number; turn?: number; held?: boolean }) {
     let body: Matter.Body;
     const common: Matter.IBodyDefinition = {
       restitution: kind === "orb" || kind === "heart" ? 1 : 0.2,
       friction: 0, frictionAir: 0, frictionStatic: 0, density: 0.0008,
       collisionFilter: { group: owner.group, category: CAT_PROJ, mask: CAT_BALL | CAT_WALL },
     };
-    if (kind === "nail" || kind === "gateblade") {
+    if (kind === "nail" || kind === "gateblade" || kind === "dagger") {
       const half = (opt.l ?? 120) / 2;
       if (kind === "nail") common.collisionFilter = { group: owner.group, category: CAT_PROJ, mask: CAT_BALL };
       body = Matter.Bodies.rectangle(x + Math.cos(angle) * half * 0.5, y + Math.sin(angle) * half * 0.5, opt.l ?? 120, opt.w ?? 10, { ...common, angle });
     } else {
       body = Matter.Bodies.circle(x, y, opt.r ?? 9, common);
     }
-    Matter.Body.setVelocity(body, { x: Math.cos(angle) * opt.speed, y: Math.sin(angle) * opt.speed });
+    // Held daggers hang motionless in the time-stop until released.
+    if (opt.held) Matter.Body.setVelocity(body, { x: 0, y: 0 });
+    else Matter.Body.setVelocity(body, { x: Math.cos(angle) * opt.speed, y: Math.sin(angle) * opt.speed });
     (body.plugin as BodyTag) = { role: "proj" };
     Matter.World.add(this.world, body);
     this.projectiles.push({
       body, kind, team: owner.team, owner, dmg: opt.dmg, color: opt.color,
       life: opt.life ?? 3, turn: opt.turn, speed: opt.speed, len: opt.l,
+      held: opt.held, lockAngle: angle, lockSpeed: opt.speed,
     });
+  }
+
+  /** Freeze the entire arena for `dur` seconds (Stasis's WORLD STASIS). */
+  beginStasis(dur: number) {
+    this.stasisT = Math.max(this.stasisT, dur);
+  }
+
+  /** Release every held dagger along its locked direction when the time-stop ends. */
+  private releaseHeld() {
+    let any = false;
+    for (const p of this.projectiles) {
+      if (!p.held) continue;
+      p.held = false;
+      any = true;
+      const a = p.lockAngle ?? 0, s = p.lockSpeed ?? 700;
+      Matter.Body.setVelocity(p.body, { x: Math.cos(a) * s, y: Math.sin(a) * s });
+    }
+    if (any) { Sound.dash(); this.shake = 16; }
   }
 
   spawnGate(owner: Fighter, dmg: number) {
@@ -350,16 +376,6 @@ export class Engine {
     this.burst(f.x, f.y, 16, of.def.color, 260);
   }
 
-  freezePulse(src: Fighter, radius: number, dur: number) {
-    this.ring(src.x, src.y, radius, src.def.color);
-    for (const o of this.enemies(src)) {
-      if (Math.hypot(o.x - src.x, o.y - src.y) <= radius + o.def.radius) {
-        o.frozen = Math.max(o.frozen, dur);
-        this.burst(o.x, o.y, 10, src.def.color, 140);
-      }
-    }
-    Sound.freeze();
-  }
 
   /** Instant beam: visual + damage to enemies intersecting the line. */
   fireBeam(owner: Fighter, x: number, y: number, angle: number, length: number, width: number, dmg: number, color: number) {
@@ -440,6 +456,16 @@ export class Engine {
       return;
     }
 
+    // WORLD STASIS: time is fully stopped. The whole arena freezes — fighters,
+    // projectiles, everything — while Stasis's daggers hang in the air. When the
+    // pause elapses, the held daggers launch along their locked directions.
+    if (this.stasisT > 0) {
+      this.stasisT -= dtReal;
+      if (this.stasisT <= 0) { this.stasisT = 0; this.releaseHeld(); }
+      this.updateFx(dtReal);
+      return;
+    }
+
     this.acc = Math.min(this.acc + dtReal * this.timescale, 0.08);
     while (this.acc >= STEP) {
       this.step(STEP);
@@ -471,13 +497,27 @@ export class Engine {
 
       f.def.update?.(f, this, dt);
 
-      // steer speed back to cruise (unless a char opted out via st.noSteer)
+      // Pull the ball toward its nearest enemy so the fighters stay mashed
+      // together and brawl — Ball Thing's balls cluster, they don't drift like
+      // a DVD logo. We ADD an attractive acceleration (physics-respecting, so
+      // collision bounces survive) and cap speed, rather than overriding the
+      // heading — overriding fights Matter's contact solver and slingshots them
+      // apart. A tangential wobble makes them jostle/orbit instead of fusing.
       if (!f.st.noSteer) {
-        const v = f.body.velocity;
-        const sp = Math.hypot(v.x, v.y) || 0.01;
-        const target = f.def.speed * (f.st.speedMult ?? 1);
-        const ns = sp + (target - sp) * Math.min(1, dt * 2.2);
-        Matter.Body.setVelocity(f.body, { x: (v.x / sp) * ns, y: (v.y / sp) * ns });
+        const target = this.nearestEnemy(f);
+        const cruise = f.def.speed * (f.st.speedMult ?? 1);
+        if (target) {
+          const dx = target.x - f.x, dy = target.y - f.y;
+          const d = Math.hypot(dx, dy) || 1;
+          const ax = dx / d, ay = dy / d;
+          const wob = Math.sin(this.time * 2 + f.id * 1.3) * 0.42;
+          const accel = 2600; // px/s² — strong enough to reel them back within a few px
+          let vx = f.body.velocity.x + (ax - ay * wob) * accel * dt;
+          let vy = f.body.velocity.y + (ay + ax * wob) * accel * dt;
+          const sp = Math.hypot(vx, vy) || 1;
+          if (sp > cruise) { vx = (vx / sp) * cruise; vy = (vy / sp) * cruise; }
+          Matter.Body.setVelocity(f.body, { x: vx, y: vy });
+        }
       }
 
       // drive weapon
@@ -587,7 +627,6 @@ export class Engine {
     for (const c of this.callouts) c.t += dt;
     this.callouts = this.callouts.filter(c => c.t < c.life);
     this.shake = Math.max(0, this.shake - dt * 55);
-    this.stasisT = Math.max(0, this.stasisT - dt);
   }
 
   destroy() {

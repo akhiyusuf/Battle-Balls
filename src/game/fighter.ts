@@ -68,7 +68,9 @@ export class Fighter {
     const group = Matter.Body.nextGroup(true); // own ball+weapon never collide
     this.group = group;
     this.body = Matter.Bodies.circle(x, y, def.radius, {
-      restitution: 0.99,
+      // Low restitution so colliding balls stay mashed together and keep
+      // brawling instead of flinging apart (they re-seek immediately anyway).
+      restitution: 0.35,
       friction: 0,
       frictionAir: 0,
       frictionStatic: 0,
@@ -88,6 +90,11 @@ export class Fighter {
     const w = this.def.weapon;
     const filter = { group, category: CAT_WEAPON, mask: CAT_BALL | CAT_WEAPON };
     const opts: Matter.IBodyDefinition = {
+      // Sensor: weapons detect hits + clashes (for damage/sparks) but never
+      // physically shove balls or each other. This lets the balls cluster and
+      // the weapons overlap in a tight brawl, exactly like Ball Thing's fights,
+      // instead of long weapons prying the balls apart at weapon's length.
+      isSensor: true,
       restitution: 0.4,
       friction: 0,
       frictionAir: 0.01,

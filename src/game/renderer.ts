@@ -146,10 +146,11 @@ export class GameRenderer {
       spr.anchor.set(0.5);
       this.weaponLayer.addChild(spr);
       view.weapon = spr;
-      for (let i = 0; i < 4; i++) {
+      // A short, tight motion-blur tail — two faint echoes hugging the weapon.
+      for (let i = 0; i < 2; i++) {
         const g = new Sprite(tex);
         g.anchor.set(0.5);
-        g.alpha = 0.1 + i * 0.04;
+        g.alpha = 0.14 - i * 0.05;
         this.ghostLayer.addChild(g);
         view.ghosts.push(g);
       }
@@ -257,9 +258,9 @@ export class GameRenderer {
           v.weapon.rotation = f.weapon.angle;
           const ws = f.st.wsize ?? 1;
           v.weapon.scale.set(ws);
-          // ghost trail
+          // Tight motion-blur tail: the two most recent weapon transforms.
           for (let i = 0; i < v.ghosts.length; i++) {
-            const gh = f.ghosts[f.ghosts.length - 2 - i * 2];
+            const gh = f.ghosts[f.ghosts.length - 2 - i];
             const g = v.ghosts[i];
             if (gh) {
               g.visible = true;
@@ -369,6 +370,24 @@ export class GameRenderer {
             x - ca * L, y - sa * L,
             x - ca * L * 0.7 + sa * 9, y - sa * L * 0.7 - ca * 9,
           ]).fill(0xe8c96a).stroke({ width: 3, color: 0x6b5010 });
+          break;
+        }
+        case "dagger": {
+          // Icy throwing dagger: pale blade + dark grip, glows while held.
+          const L = (p.len ?? 52) / 2, ca = Math.cos(a), sa = Math.sin(a);
+          const hx = x - ca * L, hy = y - sa * L; // grip end
+          if (p.held) {
+            g.circle(x, y, L + 6).stroke({ width: 2, color: 0xdff4ff, alpha: 0.5 });
+          }
+          // grip
+          g.moveTo(hx, hy).lineTo(hx + ca * L * 0.5, hy + sa * L * 0.5)
+            .stroke({ width: 7, color: 0x2e6474 });
+          // blade
+          g.poly([
+            x + ca * L, y + sa * L,
+            x + ca * L * 0.1 - sa * 7, y + sa * L * 0.1 + ca * 7,
+            x + ca * L * 0.1 + sa * 7, y + sa * L * 0.1 - ca * 7,
+          ]).fill(0xe6f6ff).stroke({ width: 3, color: 0x2e6474 });
           break;
         }
       }

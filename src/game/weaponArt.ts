@@ -16,33 +16,56 @@ export function drawWeaponGraphic(def: CharacterDef): Graphics {
       switch (w.style) {
         case "sword":
         case "greatsword": {
-          // grip
-          g.rect(x0, -W * 0.28, L * 0.16, W * 0.56).fill(0x6b4a2f).stroke({ width: 3, color: D });
-          // crossguard
-          g.rect(x0 + L * 0.15, -W * 0.85, L * 0.05, W * 1.7).fill(C).stroke({ width: 3, color: D });
-          // blade
+          const bladeStart = x0 + L * 0.22, tip = L / 2;
+          // pommel
+          g.circle(x0, 0, W * 0.42).fill(C).stroke({ width: 3, color: D });
+          // wrapped grip
+          g.rect(x0, -W * 0.22, L * 0.18, W * 0.44).fill(0x5a3d26).stroke({ width: 3, color: D });
+          for (let i = 1; i < 4; i++) g.moveTo(x0 + L * 0.045 * i, -W * 0.22).lineTo(x0 + L * 0.045 * i, W * 0.22).stroke({ width: 1.5, color: 0x2e1e12 });
+          // crossguard with beveled ends
+          g.poly([x0 + L * 0.16, -W * 1.0, x0 + L * 0.23, -W * 0.72, x0 + L * 0.23, W * 0.72, x0 + L * 0.16, W * 1.0])
+            .fill(C).stroke({ width: 3, color: D });
+          // steel blade, tapered to a point
           g.poly([
-            x0 + L * 0.2, -W * 0.5, L / 2 - W * 0.9, -W * 0.5, L / 2, 0,
-            L / 2 - W * 0.9, W * 0.5, x0 + L * 0.2, W * 0.5,
-          ]).fill(0xdfe3ea).stroke({ width: 3, color: D });
-          // fuller line
-          g.moveTo(x0 + L * 0.24, 0).lineTo(L / 2 - W, 0).stroke({ width: 2, color: 0xaab0bd });
+            bladeStart, -W * 0.55, tip - W * 1.0, -W * 0.5, tip, 0,
+            tip - W * 1.0, W * 0.5, bladeStart, W * 0.55,
+          ]).fill(0xd7dce6).stroke({ width: 3.5, color: D });
+          // bright edges + central fuller
+          g.moveTo(bladeStart, -W * 0.42).lineTo(tip - W * 1.1, -W * 0.38).stroke({ width: 2, color: 0xffffff });
+          g.moveTo(bladeStart + L * 0.02, 0).lineTo(tip - W * 1.2, 0).stroke({ width: 2, color: 0x9aa2b2 });
           break;
         }
         case "katana": {
-          g.rect(x0, -W * 0.22, L * 0.18, W * 0.44).fill(0x24272e).stroke({ width: 3, color: D });
-          g.circle(x0 + L * 0.19, 0, W * 0.55).fill(0xc9a44a).stroke({ width: 2, color: D });
+          const guard = x0 + L * 0.2, tip = L / 2;
+          // dark bound handle
+          g.rect(x0, -W * 0.2, L * 0.2, W * 0.4).fill(0x1f2228).stroke({ width: 3, color: D });
+          for (let i = 1; i < 4; i++) g.moveTo(x0 + L * 0.05 * i, -W * 0.2).lineTo(x0 + L * 0.05 * i, W * 0.2).stroke({ width: 1.5, color: 0x0e0f13 });
+          // round tsuba guard
+          g.circle(guard, 0, W * 0.62).fill(0xc9a44a).stroke({ width: 3, color: D });
+          // single-edged curved blade (gentle upward curve)
           g.poly([
-            x0 + L * 0.22, -W * 0.32, L / 2 - W * 0.8, -W * 0.42, L / 2, -W * 0.05,
-            L / 2 - W * 0.8, W * 0.18, x0 + L * 0.22, W * 0.28,
-          ]).fill(0xeef1f6).stroke({ width: 3, color: D });
+            guard, -W * 0.34, tip - W * 1.2, -W * 0.62, tip, -W * 0.18,
+            tip - W * 1.1, W * 0.05, guard, W * 0.3,
+          ]).fill(0xeef2f8).stroke({ width: 3, color: D });
+          // hamon edge line
+          g.moveTo(guard + L * 0.02, -W * 0.22).lineTo(tip - W * 1.1, -W * 0.46).stroke({ width: 2, color: 0xffffff });
           break;
         }
         case "axe": {
-          g.rect(x0, -W * 0.16, L * 0.85, W * 0.32).fill(0x8a6a45).stroke({ width: 3, color: D });
-          const hx = L / 2 - W * 0.6;
-          g.poly([hx - W * 0.5, -W * 1.15, hx + W * 0.75, -W * 0.55, hx + W * 0.85, W * 0.55, hx - W * 0.5, W * 1.15])
-            .fill(C).stroke({ width: 3, color: D });
+          const hx = L / 2 - W * 0.5;
+          // wooden haft
+          g.rect(x0, -W * 0.16, L * 0.95, W * 0.32).fill(0x7a5230).stroke({ width: 3, color: D });
+          g.rect(x0, -W * 0.16, L * 0.95, W * 0.1).fill(0x94663d); // top highlight
+          // big crescent axe head
+          g.poly([
+            hx - W * 0.4, -W * 1.35, hx + W * 0.9, -W * 0.75,
+            hx + W * 1.05, 0, hx + W * 0.9, W * 0.75, hx - W * 0.4, W * 1.35,
+            hx + W * 0.15, 0,
+          ]).fill(C).stroke({ width: 3.5, color: D });
+          // bright cutting edge
+          g.moveTo(hx + W * 0.9, -W * 0.72).lineTo(hx + W * 1.02, 0).lineTo(hx + W * 0.9, W * 0.72).stroke({ width: 2.5, color: 0xffffff });
+          // top spike
+          g.poly([hx - W * 0.1, -W * 1.3, hx + W * 0.25, -W * 1.85, hx + W * 0.35, -W * 1.2]).fill(C).stroke({ width: 2.5, color: D });
           break;
         }
         case "dagger": {
