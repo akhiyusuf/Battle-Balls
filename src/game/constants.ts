@@ -20,8 +20,6 @@ export const STEP = 1 / 120;
  */
 export const VEL = 1 / 60;
 
-/** Per attacker+weapon hit cooldown on a target (s). */
-export const HIT_COOLDOWN = 0.85;
 
 /** Ult meter capacity. */
 export const METER_MAX = 100;

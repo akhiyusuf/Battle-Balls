@@ -1,20 +1,21 @@
 import Matter from "matter-js";
 import { Fighter, tagOf, CAT_PROJ, CAT_WALL, CAT_BALL } from "./fighter";
 import type { BodyTag } from "./fighter";
-import { ARENA_SIZE, ARENA_X, ARENA_Y, HIT_COOLDOWN, METER_MAX, STEP, VEL } from "./constants";
+import { ARENA_SIZE, ARENA_X, ARENA_Y, METER_MAX, STEP, VEL } from "./constants";
 import { Rng } from "./rng";
 import { Sound } from "./audio";
+import { steer } from "./movement";
+import { capsuleHitsCircle } from "./geometry";
+import { Fx } from "./effects";
+import { COMBAT } from "./tuning";
 import { getChar } from "./characters";
 import type { EngineEvent, LineupEntry, MatchPhase } from "./types";
 
-export interface Particle {
-  x: number; y: number; vx: number; vy: number;
-  t: number; life: number; size: number; color: number;
+/** Circle (x,y,r) vs a fighter's ball. */
+function within(x: number, y: number, r: number, o: Fighter): boolean {
+  const dx = o.x - x, dy = o.y - y, rr = r + o.def.radius;
+  return dx * dx + dy * dy <= rr * rr;
 }
-export interface Ring { x: number; y: number; r: number; max: number; w: number; color: number; t: number; life: number }
-export interface Popup { x: number; y: number; vy: number; t: number; life: number; text: string; color: number; crit: boolean }
-export interface Beam { x: number; y: number; angle: number; length: number; width: number; color: number; t: number; life: number }
-export interface Callout { text: string; color: number; t: number; life: number }
 
 export interface Projectile {
   body: Matter.Body;
@@ -54,12 +55,7 @@ export class Engine {
   roster: Fighter[] = [];
   projectiles: Projectile[] = [];
   gates: Gate[] = [];
-  particles: Particle[] = [];
-  rings: Ring[] = [];
-  popups: Popup[] = [];
-  beams: Beam[] = [];
-  callouts: Callout[] = [];
-  shake = 0;
+  fx: Fx;
   time = 0;
   /** WORLD STASIS time-stop overlay timer. */
   stasisT = 0;
@@ -81,6 +77,7 @@ export class Engine {
 
   constructor(lineup: LineupEntry[], seed: number) {
     this.rng = new Rng(seed);
+    this.fx = new Fx(this.rng);
     this.physics = Matter.Engine.create({ gravity: { x: 0, y: 0, scale: 0 } });
     this.physics.positionIterations = 8;
     this.physics.velocityIterations = 6;
@@ -117,7 +114,12 @@ export class Engine {
       this.roster.push(f);
     });
 
-    Matter.Events.on(this.physics, "collisionStart", (ev) => this.onCollisions(ev));
+    // Weapons are sensors that can rest inside an enemy while the balls are
+    // mashed together, so collisionStart alone barely fires. collisionActive
+    // fires every tick for ongoing overlaps; the per-hit cooldowns gate the
+    // actual damage rate. Projectiles are handled on start only.
+    Matter.Events.on(this.physics, "collisionStart", (ev) => this.onCollisions(ev, true));
+    Matter.Events.on(this.physics, "collisionActive", (ev) => this.onCollisions(ev, false));
   }
 
   addFighter(f: Fighter) {
@@ -141,24 +143,79 @@ export class Engine {
 
   enemies(f: Fighter) { return this.fighters.filter(o => o.alive && o.team !== f.team); }
 
+  // FX access for the renderer (state lives in this.fx).
+  get particles() { return this.fx.particles; }
+  get rings() { return this.fx.rings; }
+  get popups() { return this.fx.popups; }
+  get beams() { return this.fx.beams; }
+  get callouts() { return this.fx.callouts; }
+  get shake() { return this.fx.shake; }
+  set shake(v: number) { this.fx.shake = v; }
+
+  // Thin spawn delegates so characters keep calling e.burst / e.ring.
+  burst(x: number, y: number, n: number, color: number, spd: number) { this.fx.burst(x, y, n, color, spd); }
+  ring(x: number, y: number, max: number, color: number) { this.fx.ring(x, y, max, color); }
+
   /** Angle from (x,y) that leads a moving target for a projectile of given speed. */
   aimLead(x: number, y: number, target: Fighter, projSpeed: number): number {
     const d = Math.hypot(target.x - x, target.y - y);
     const t = d / projSpeed;
-    const px = target.x + target.body.velocity.x * 60 * t * 0.85;
-    const py = target.y + target.body.velocity.y * 60 * t * 0.85;
+    const px = target.x + target.body.velocity.x * 60 * t * 0.5;
+    const py = target.y + target.body.velocity.y * 60 * t * 0.5;
     return Math.atan2(py - y, px - x);
   }
 
   // ---------- combat ----------
 
-  private onCollisions(ev: Matter.IEventCollision<Matter.Engine>) {
+  /**
+   * Reliable melee: hit-test each fighter's weapon as a capsule (or circles for
+   * saws/orbitals) against enemy balls, gated by the per-weapon hit cooldown.
+   * Uses the weapon body's live position/angle so it matches the rendered blade,
+   * but does its own geometry so fast spins never tunnel.
+   */
+  private meleeStep() {
+    for (const f of this.aliveFighters()) {
+      const w = f.def.weapon;
+      if (!f.weapon || w.kind === "gun" || w.kind === "none") continue;
+      const key = `${f.id}:w`;
+      const dmg = f.st.damage;
+      const wa = f.weapon.angle;
+      const ca = Math.cos(wa), sa = Math.sin(wa);
+
+      // Build the weapon's world-space colliders.
+      let hit: (o: Fighter) => boolean;
+      if (w.kind === "saw") {
+        hit = (o) => within(f.weapon!.position.x, f.weapon!.position.y, w.radius, o);
+      } else if (w.kind === "orbitals") {
+        const parts = f.weapon.parts.length > 1 ? f.weapon.parts.slice(1) : [f.weapon];
+        hit = (o) => parts.some((p) => within(p.position.x, p.position.y, w.radius, o));
+      } else {
+        // blade or staff: a capsule along the weapon's long axis
+        const half = (w.length / 2) * (f.st.wsize ?? 1);
+        const cx = f.weapon.position.x, cy = f.weapon.position.y, r = w.width / 2 + 2;
+        const ax = cx - ca * half, ay = cy - sa * half;
+        const bx = cx + ca * half, by = cy + sa * half;
+        hit = (o) => capsuleHitsCircle(ax, ay, bx, by, r, o.x, o.y, o.def.radius);
+      }
+
+      for (const o of this.enemies(f)) {
+        if (o.hitCooldowns.has(key)) continue;
+        if (hit(o)) {
+          o.hitCooldowns.set(key, COMBAT.hitCooldown);
+          this.dealDamage(f, o, dmg);
+          if (!o.alive) break;
+        }
+      }
+    }
+  }
+
+  private onCollisions(ev: Matter.IEventCollision<Matter.Engine>, isStart: boolean) {
     if (this.phase !== "fight" && this.phase !== "ko") return;
     for (const pair of ev.pairs) {
       const a = tagOf(pair.bodyA), b = tagOf(pair.bodyB);
       if (!a || !b) continue;
-      this.handlePair(a, b, pair);
-      this.handlePair(b, a, pair);
+      this.handlePair(a, b, pair, isStart);
+      this.handlePair(b, a, pair, isStart);
     }
   }
 
@@ -168,22 +225,18 @@ export class Engine {
     return { x: (pair.bodyA.position.x + pair.bodyB.position.x) / 2, y: (pair.bodyA.position.y + pair.bodyB.position.y) / 2 };
   }
 
-  private handlePair(a: BodyTag, b: BodyTag, pair: Matter.Pair) {
-    // weapon hits enemy ball
-    if (a.role === "weapon" && b.role === "ball" && a.fighter && b.fighter
-      && a.fighter.alive && b.fighter.alive && a.fighter.team !== b.fighter.team) {
-      const key = `${a.fighter.id}:w`;
-      if (!b.fighter.hitCooldowns.has(key)) {
-        b.fighter.hitCooldowns.set(key, HIT_COOLDOWN);
-        this.dealDamage(a.fighter, b.fighter, a.fighter.st.damage);
-      }
-    }
+  private handlePair(a: BodyTag, b: BodyTag, pair: Matter.Pair, isStart: boolean) {
+    // NB: weapon→ball damage is NOT resolved here. A fast-spinning thin weapon
+    // sensor tunnels through Matter's discrete detector, so melee is hit-tested
+    // manually with capsule geometry in meleeStep(). This branch only handles
+    // cosmetic weapon clashes, ball-ram contact damage, and projectile hits.
+
     // weapon vs weapon clank
     if (a.role === "weapon" && b.role === "weapon" && a.fighter && b.fighter
       && a.fighter.team !== b.fighter.team && a.fighter.alive && b.fighter.alive) {
       const key = `${Math.min(a.fighter.id, b.fighter.id)}x${Math.max(a.fighter.id, b.fighter.id)}`;
       if (!this.clashCd.has(key)) {
-        this.clashCd.set(key, 0.25);
+        this.clashCd.set(key, COMBAT.clashCooldown);
         const p = this.contactPoint(pair);
         this.burst(p.x, p.y, 8, 0xfff3b0, 260);
         Sound.clash();
@@ -196,13 +249,13 @@ export class Engine {
       if (contact > 0) {
         const key = `${a.fighter.id}>${b.fighter.id}`;
         if (!this.bodyCd.has(key)) {
-          this.bodyCd.set(key, 0.4);
+          this.bodyCd.set(key, COMBAT.bodyCooldown);
           this.dealDamage(a.fighter, b.fighter, contact);
         }
       }
     }
-    // projectile hits
-    if (a.role === "proj") {
+    // projectile hits — resolve once, on first contact only
+    if (a.role === "proj" && isStart) {
       const proj = this.projectiles.find(p => p.body === (pair.bodyA.parent ?? pair.bodyA) || p.body === (pair.bodyB.parent ?? pair.bodyB));
       // Held daggers are inert while frozen in the time-stop — no hits, no dying.
       if (!proj || proj.stuck || proj.held) return;
@@ -241,10 +294,7 @@ export class Engine {
   dealDamage(from: Fighter | null, to: Fighter, base: number, opt?: { proj?: boolean; color?: number; noLifesteal?: boolean }) {
     if (!to.alive || base <= 0) return;
     if (to.def.dodge?.(to, this)) {
-      this.popups.push({
-        x: to.x + this.rng.range(-14, 14), y: to.y - to.def.radius - 10,
-        vy: -90, t: 0, life: 0.6, text: "MISS", color: 0xbdbdc4, crit: false,
-      });
+      this.fx.popup(to.x + this.rng.range(-14, 14), to.y - to.def.radius - 10, "MISS", 0xbdbdc4, false);
       const a = this.rng.range(0, Math.PI * 2);
       Matter.Body.setVelocity(to.body, { x: Math.cos(a) * to.def.speed * 1.6 * VEL, y: Math.sin(a) * to.def.speed * 1.6 * VEL });
       return;
@@ -253,27 +303,25 @@ export class Engine {
     if (from?.def.modDamage) dmg = from.def.modDamage(from, dmg, this);
     if (to.frozen > 0) dmg *= 1.4;
     if (to.shieldT > 0) dmg *= 0.25;
-    dmg *= 1 + Math.max(0, this.time - 60) / 45; // sudden-death ramp
+    dmg *= 1 + Math.max(0, this.time - COMBAT.suddenDeathAfter) / COMBAT.suddenDeathOver;
     dmg = Math.max(1, Math.round(dmg));
     to.hp -= dmg;
     to.flash = 0.12;
-    if (from) {
-      // punchy knockback away from the attacker
+    // Melee knocks the target back (brawl feel + bounce); projectiles do NOT —
+    // otherwise ranged fighters kite-lock melee by shoving them away every shot.
+    if (from && !opt?.proj) {
       const ka = Math.atan2(to.y - from.y, to.x - from.x);
-      const k = Math.min(420, 150 + dmg * 14) * VEL / Math.max(0.6, to.def.massMult ?? 1);
+      const k = Math.min(COMBAT.knockCap, COMBAT.knockBase + dmg * COMBAT.knockPerDmg) * VEL / Math.max(0.6, to.def.massMult ?? 1);
       Matter.Body.setVelocity(to.body, {
         x: to.body.velocity.x + Math.cos(ka) * k,
         y: to.body.velocity.y + Math.sin(ka) * k,
       });
     }
     const crit = from ? dmg >= from.st.damage * 1.8 : dmg >= 15;
-    this.popups.push({
-      x: to.x + this.rng.range(-14, 14), y: to.y - to.def.radius - 10,
-      vy: -110, t: 0, life: 0.75, text: String(dmg),
-      color: opt?.color ?? (from ? from.def.color : 0xffffff), crit,
-    });
+    this.fx.popup(to.x + this.rng.range(-14, 14), to.y - to.def.radius - 10, String(dmg),
+      opt?.color ?? (from ? from.def.color : 0xffffff), crit);
     this.burst(to.x, to.y, crit ? 14 : 7, opt?.color ?? to.def.color, crit ? 320 : 200);
-    this.shake = Math.min(22, this.shake + (crit ? 8 : 3));
+    this.fx.addShake(crit ? 8 : 3);
     if (crit) this.hitstop = Math.max(this.hitstop, 0.05);
     Sound.hit(crit);
 
@@ -292,7 +340,7 @@ export class Engine {
     f.hp = f.hp + amount;
     if (opt?.overheal) f.maxhp = Math.max(f.maxhp, f.hp); // lifesteal can push past max (Shredder hit 331 in his videos)
     else f.hp = Math.min(f.maxhp, f.hp);
-    this.rings.push({ x: f.x, y: f.y, r: f.def.radius, max: f.def.radius + 30, w: 5, color: 0x5ed65e, t: 0, life: 0.35 });
+    this.fx.ring(f.x, f.y, f.def.radius + 30, 0x5ed65e, 5);
   }
 
   kill(f: Fighter) {
@@ -441,7 +489,7 @@ export class Engine {
 
   /** Instant beam: visual + damage to enemies intersecting the line. */
   fireBeam(owner: Fighter, x: number, y: number, angle: number, length: number, width: number, dmg: number, color: number) {
-    this.beams.push({ x, y, angle, length, width, color, t: 0, life: 0.4 });
+    this.fx.beam(x, y, angle, length, width, color);
     const dx = Math.cos(angle), dy = Math.sin(angle);
     for (const o of this.enemies(owner)) {
       // distance from point to segment
@@ -450,28 +498,14 @@ export class Engine {
       const d = Math.hypot(px - dx * t, py - dy * t);
       if (d <= width / 2 + o.def.radius) this.dealDamage(owner, o, dmg, { color });
     }
-    this.shake = Math.min(26, this.shake + 12);
+    this.fx.addShake(12);
   }
 
   calloutUlt(f: Fighter) {
-    this.callouts.push({ text: f.def.ult.name, color: f.def.color, t: 0, life: 1.4 });
+    this.fx.callout(f.def.ult.name, f.def.color);
     this.events.push({ type: "ult", fighter: f.def.name, ultName: f.def.ult.name });
     this.hitstop = Math.max(this.hitstop, 0.12);
     Sound.ult();
-  }
-
-  burst(x: number, y: number, n: number, color: number, spd: number) {
-    for (let i = 0; i < n; i++) {
-      const a = this.rng.range(0, Math.PI * 2), s = this.rng.range(spd * 0.3, spd);
-      this.particles.push({
-        x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
-        t: 0, life: this.rng.range(0.25, 0.55), size: this.rng.range(2, 6), color,
-      });
-    }
-  }
-
-  ring(x: number, y: number, max: number, color: number) {
-    this.rings.push({ x, y, r: 8, max, w: 6, color, t: 0, life: 0.4 });
   }
 
   // ---------- main loop ----------
@@ -495,15 +529,15 @@ export class Engine {
     this.slowmo = Math.max(0, this.slowmo - dtReal);
 
     if (this.phase === "intro") {
-      this.updateFx(dtReal);
+      this.fx.update(dtReal);
       if (this.phaseT >= 1.5) this.setPhase("fight");
       return;
     }
     if (this.phase === "winner") {
-      this.updateFx(dtReal);
+      this.fx.update(dtReal);
       // confetti
       if (this.phaseT < 1.5 && this.rng.next() < 0.5) {
-        this.particles.push({
+        this.fx.particles.push({
           x: this.rng.range(ARENA_X, ARENA_X + ARENA_SIZE), y: ARENA_Y + 10,
           vx: this.rng.range(-60, 60), vy: this.rng.range(150, 380),
           t: 0, life: this.rng.range(0.9, 1.7), size: this.rng.range(3, 7),
@@ -525,7 +559,7 @@ export class Engine {
       this.stasisT -= dtReal;
       this.stepStasisCast(dtReal);
       if (this.stasisT <= 0) { this.stasisT = 0; this.releaseHeld(); }
-      this.updateFx(dtReal);
+      this.fx.update(dtReal);
       return;
     }
 
@@ -534,7 +568,7 @@ export class Engine {
       this.step(STEP);
       this.acc -= STEP;
     }
-    this.updateFx(dtReal);
+    this.fx.update(dtReal);
   }
 
   private step(dt: number) {
@@ -566,28 +600,7 @@ export class Engine {
 
       f.def.update?.(f, this, dt);
 
-      // Pull the ball toward its nearest enemy so the fighters stay mashed
-      // together and brawl — Ball Thing's balls cluster, they don't drift like
-      // a DVD logo. We ADD an attractive acceleration (physics-respecting, so
-      // collision bounces survive) and cap speed, rather than overriding the
-      // heading — overriding fights Matter's contact solver and slingshots them
-      // apart. A tangential wobble makes them jostle/orbit instead of fusing.
-      if (!f.st.noSteer) {
-        const target = this.nearestEnemy(f);
-        const cruise = f.def.speed * (f.st.speedMult ?? 1);
-        if (target) {
-          const dx = target.x - f.x, dy = target.y - f.y;
-          const d = Math.hypot(dx, dy) || 1;
-          const ax = dx / d, ay = dy / d;
-          const wob = Math.sin(this.time * 2 + f.id * 1.3) * 0.42;
-          const accel = 900; // px/s²
-          let vx = f.body.velocity.x * 60 + (ax - ay * wob) * accel * dt;
-          let vy = f.body.velocity.y * 60 + (ay + ax * wob) * accel * dt;
-          const sp = Math.hypot(vx, vy) || 1;
-          if (sp > cruise) { vx = (vx / sp) * cruise; vy = (vy / sp) * cruise; }
-          Matter.Body.setVelocity(f.body, { x: vx * VEL, y: vy * VEL });
-        }
-      }
+      steer(f, this.nearestEnemy(f), this.time, dt);
 
       // drive weapon
       if (f.def.weapon.kind === "gun") {
@@ -610,6 +623,8 @@ export class Engine {
         if (f.ghosts.length > 7) f.ghosts.shift();
       }
     }
+
+    this.meleeStep();
 
     // projectiles
     for (const p of this.projectiles) {
@@ -676,26 +691,6 @@ export class Engine {
       const alive = this.aliveFighters().filter(f => !f.isClone).sort((a, b) => b.hp - a.hp);
       for (let i = 1; i < alive.length; i++) this.kill(alive[i]);
     }
-  }
-
-  private updateFx(dt: number) {
-    for (const p of this.particles) {
-      p.t += dt;
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.vx *= 1 - 3 * dt;
-      p.vy *= 1 - 3 * dt;
-    }
-    this.particles = this.particles.filter(p => p.t < p.life);
-    for (const p of this.popups) { p.t += dt; p.y += p.vy * dt; p.vy *= 1 - 2.5 * dt; }
-    this.popups = this.popups.filter(p => p.t < p.life);
-    for (const r of this.rings) { r.t += dt; r.r += (r.max - r.r) * Math.min(1, dt * 14); }
-    this.rings = this.rings.filter(r => r.t < r.life);
-    for (const b of this.beams) b.t += dt;
-    this.beams = this.beams.filter(b => b.t < b.life);
-    for (const c of this.callouts) c.t += dt;
-    this.callouts = this.callouts.filter(c => c.t < c.life);
-    this.shake = Math.max(0, this.shake - dt * 55);
   }
 
   destroy() {

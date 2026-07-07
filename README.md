@@ -56,14 +56,38 @@ Ult names in **bold** were read directly off the meter bars in his videos.
 | Vessel | **DETERMINATION** | flat heavy damage; refuses to fall |
 | Thunderclad | THUNDERCALL | chain lightning; ult strikes every enemy |
 
+## Code layout
+
+The `src/game` engine is split by concern:
+
+| Module | Responsibility |
+| --- | --- |
+| `engine.ts` | Orchestration: phase machine, combat resolution, projectiles, ults |
+| `movement.ts` | The steering model (bounce + distance-scaled homing) |
+| `effects.ts` | `Fx` — particles, rings, damage popups, beams, callouts, shake |
+| `geometry.ts` | Capsule/circle hit-testing for reliable melee |
+| `tuning.ts` | All feel knobs in one place (physics, movement, combat) |
+| `characters.ts` | The 19-fighter roster + staged ult scripts |
+| `weaponArt.ts` / `themes.ts` | Pixel-art weapon sprites and arena wallpapers |
+| `renderer.ts` | Pixi scene graph, synced from engine state each frame |
+
 ## Engine notes
 
-- Weapons are real Matter.js bodies pinned to the ball's center and driven by
-  motor torque — clashes physically stagger them, which is what gives the
-  fights their flailing, reactive feel
-- Deterministic seeded RNG end-to-end: replays are exact
-- Projectiles lead their targets; nails pierce through fighters and stick
-  into the arena border
-- Ult meters charge from damage dealt + taken; ults fire automatically
-- Sudden-death damage ramp keeps every fight converging
-- Balance was tuned via headless 342-fight sweeps across all 171 matchups
+- **Movement**: balls keep constant cruise speed and ricochet off walls and
+  each other; a distance-scaled homing bias pulls them back together only once
+  they drift apart, so they bounce-and-brawl instead of gluing together or
+  drifting off. (Matter.js velocity is per-tick, not per-second — everything
+  converts at the physics boundary via `VEL`, or the sim runs ~60× too fast.)
+- **Melee** is hit-tested with capsule geometry each step, not Matter
+  collisions — a fast thin spinning blade tunnels straight through Matter's
+  discrete detector, so physics-based melee barely registers.
+- Weapons are sensor bodies (they detect but never shove), so the balls cluster
+  and the weapons overlap in a tight brawl.
+- Deterministic seeded RNG end-to-end: replays are exact.
+- Ults are staged animations driven by an in-engine scheduler; meters charge
+  from damage dealt + taken and fire automatically.
+- Projectiles lead their targets and deal no knockback (melee does); nails
+  pierce and stick into the arena border.
+- A sudden-death damage ramp keeps every fight converging.
+- Balance was tuned via headless 342-fight sweeps across all 171 matchups to a
+  ~28–75% win-rate band.

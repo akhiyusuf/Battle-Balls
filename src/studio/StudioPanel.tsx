@@ -102,7 +102,7 @@ export function StudioPanel(p: Props) {
         </div>
         <div className="row">
           <span className="lbl">Speed</span>
-          {[0.5, 1, 2].map(s => (
+          {[0.5, 1, 2, 3].map(s => (
             <button key={s} className={p.speed === s ? "on" : ""} onClick={() => p.onSpeed(s)}>{s}×</button>
           ))}
           <button onClick={p.onMute}>{p.muted ? "🔇" : "🔊"}</button>

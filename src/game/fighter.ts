@@ -1,6 +1,8 @@
 import Matter from "matter-js";
 import type { CharacterDef, WeaponShape } from "./types";
 import { METER_MAX, VEL } from "./constants";
+import { BALL, WEAPON } from "./tuning";
+import { restOverride } from "./movement";
 
 export const CAT_BALL = 0x0001;
 export const CAT_WEAPON = 0x0002;
@@ -68,13 +70,12 @@ export class Fighter {
     const group = Matter.Body.nextGroup(true); // own ball+weapon never collide
     this.group = group;
     this.body = Matter.Bodies.circle(x, y, def.radius, {
-      // Low restitution so colliding balls stay mashed together and keep
-      // brawling instead of flinging apart (they re-seek immediately anyway).
-      restitution: 0.5,
+      // Bouncy: balls ricochet off each other and the walls energetically.
+      restitution: restOverride() ?? BALL.restitution,
       friction: 0,
       frictionAir: 0,
       frictionStatic: 0,
-      density: 0.0012 * (def.massMult ?? 1),
+      density: BALL.density * (def.massMult ?? 1),
       collisionFilter: { group, category: CAT_BALL, mask: CAT_BALL | CAT_WEAPON | CAT_PROJ | CAT_WALL },
     });
     Matter.Body.setVelocity(this.body, { x: Math.cos(dir) * def.speed * VEL, y: Math.sin(dir) * def.speed * VEL });
@@ -98,7 +99,7 @@ export class Fighter {
       restitution: 0.4,
       friction: 0,
       frictionAir: 0.01,
-      density: 0.0004,
+      density: WEAPON.density,
       collisionFilter: filter,
     };
     const r = this.def.radius;
